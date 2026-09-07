@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from './firebaseConfig';
 import { 
   DoorOpen, 
   DoorClosed, 
@@ -45,35 +47,31 @@ const App = () => {
     const interval = setInterval(() => setTime(new Date()), 1000);
     const timeout = setTimeout(() => setStatus('connected'), 2000);
 
-    const mock = setInterval(() => {
-      setNodes(prev => {
-        const new_state = { ...prev };
-        const rand_action = Math.random();
+    const unsub = onSnapshot(doc(db, "sensors", "my_first_sensor"), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
         const now = new Date().toLocaleTimeString();
-
-        if (rand_action < 0.2) {
-          new_state.door = { ...new_state.door, is_open: !new_state.door.is_open, last_update: now };
-        } else if (rand_action >= 0.2 && rand_action < 0.4) {
-          new_state.mailbox = { ...new_state.mailbox, new_letter: !new_state.mailbox.new_letter, last_update: now };
-        } else if (rand_action >= 0.4 && rand_action < 0.6) {
-          new_state.mailbox = { ...new_state.mailbox, vibration: true, last_update: now };
-          
-          setTimeout(() => {
-            setNodes(curr => ({
-              ...curr,
-              mailbox: { ...curr.mailbox, vibration: false, last_update: new Date().toLocaleTimeString() }
-            }));
-          }, 2500);
-        }
         
-        return new_state;
-      });
-    }, 4000);
+        setNodes(prev => ({
+          ...prev,
+          door: {
+            ...prev.door,
+            is_open: data.update_count % 2 !== 0, 
+            rssi: data.rssi || 0,
+            last_update: now 
+          }
+        }));
+      } else {
+        console.log("No document in the database");
+      }
+    }, (error) => {
+        console.error("Error during connecting to database:", error);
+    });
 
     return () => {
       clearInterval(interval);
       clearTimeout(timeout);
-      clearInterval(mock);
+      unsub(); 
     };
   }, []);
 
