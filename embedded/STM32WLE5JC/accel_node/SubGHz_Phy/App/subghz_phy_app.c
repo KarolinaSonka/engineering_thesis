@@ -20,6 +20,7 @@
 #include "usart.h"
 #include "stm32_seq.h"
 #include "stm32_timer.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -91,6 +92,7 @@ static void OnRxError(void);
 /* USER CODE BEGIN PFP */
 static void TxTimerCallback(void *context);
 static void TxProcess(void);
+extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -190,8 +192,11 @@ static void OnRxError(void)
 /* USER CODE BEGIN PrFD */
 void Master_Radio_Send(void)
 {
-    uint8_t message[] = "LORA_TEST_HELLO";
-    Radio.Send(message, sizeof(message) - 1);
+	int16_t x, y, z;
+	Read_ADXL345(&x, &y, &z);
+	uint8_t my_tx_buffer[32];
+	uint16_t payload_len = snprintf((char*)my_tx_buffer, sizeof(my_tx_buffer), "X:%d Y:%d Z:%d", x, y, z);
+	Radio.Send(my_tx_buffer, payload_len);
 }
 
 static void TxTimerCallback(void *context)
