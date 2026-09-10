@@ -59,8 +59,11 @@ void setup() {
   Serial.println();
   Serial.println("Connected");
 
+  Serial.println("Synchronizing system time with NTP server");
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
   config.api_key = API_KEY;
-  config.token_status_callback = tokenStatusCallback; // Będzie wypisywać w konsoli, co się dzieje z tokenem
+  config.token_status_callback = tokenStatusCallback; 
 
   Serial.println("Anonymous registration");
   if (Firebase.signUp(&config, &auth, "", "")) {
@@ -117,7 +120,7 @@ void loop() {
       blinkLed(1);
 
       if (Firebase.ready()) {
-        Serial.println("Sending data to Firestore");
+        Serial.println("Uploading telemetry to Firestore...");
         
         FirebaseJson content;
         content.set("fields/node_type/integerValue", receivedData.node_type);
@@ -128,15 +131,35 @@ void loop() {
         content.set("fields/sensor_state/integerValue", receivedData.sensor_state);
         content.set("fields/battery_lvl/integerValue", receivedData.battery_lvl);
         content.set("fields/rssi/doubleValue", radio.getRSSI());
+
+        // format ISO 8601 / RFC 3339 UTC timestamp required by Firestore
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+          char timeStr[30];
+          strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+          content.set("fields/timestamp/timestampValue", timeStr);
+        } else {
+          Serial.println("Warning: NTP time not yet synchronized");
+        }
         
         String documentPath = "sensors/";
         documentPath += receivedData.node_id;
-        String mask = "device_type,msg_counter,acc_x,acc_y,acc_z,sensor_state,battery_lvl,rssi";
+        String updateMask = "node_type,msg_counter,acc_x,acc_y,acc_z,sensor_state,battery_lvl,rssi,timestamp";
         
-        if (Firebase.Firestore.patchDocument(&fbdo, PROJECT_ID, "", documentPath.c_str(), content.raw(), mask.c_str())) {
-          Serial.println("Document updated");
+        if (Firebase.Firestore.patchDocument(&fbdo, PROJECT_ID, "", documentPath.c_str(), content.raw(), updateMask.c_str())) {
+          Serial.println("Live document updated successfully");
         } else {
-          Serial.print("Error during saving in Firebase: ");
+          Serial.print("patchDocument failed: ");
+          Serial.println(fbdo.errorReason());
+        }
+
+        String historyPath = documentPath;
+        historyPath += "/readings";
+        
+        if (Firebase.Firestore.createDocument(&fbdo, PROJECT_ID, "", historyPath.c_str(), content.raw())) {
+          Serial.println("Historical record appended successfully");
+        } else {
+          Serial.print("createDocument failed: ");
           Serial.println(fbdo.errorReason());
         }
       }
