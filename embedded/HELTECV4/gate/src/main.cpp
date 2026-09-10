@@ -5,6 +5,7 @@
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 #include "sensitive_data.h"
+#include "lora_frame.h"
 
 FirebaseData fbdo;
 FirebaseAuth auth;
@@ -22,8 +23,6 @@ FirebaseConfig config;
 #define LED_PIN 35 
 
 SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
-
-String message;
 
 void blinkLed(int times)
 {
@@ -100,43 +99,54 @@ blinkLed(3);
 }
 
 void loop() {
-  int state = radio.receive(message);
+  uint8_t byteArr[sizeof(LoRaNodeData)];
+  int state = radio.receive(byteArr, sizeof(LoRaNodeData));
 
   if (state == RADIOLIB_ERR_NONE) {
-    Serial.println("Received message from node");
-    Serial.print("Data: ");
-    Serial.println(message);
-    
-    Serial.print("RSSI: ");
-    Serial.print(radio.getRSSI());
-    Serial.println(" dBm");
-
-    blinkLed(1);
-
-    if (Firebase.ready()) {
-      Serial.println("Sending received data to Firestore");
-
-      static int messageCounter = 0;
-      messageCounter++;
+    if (radio.getPacketLength() == sizeof(LoRaNodeData)) {
       
-      FirebaseJson content;
-      content.set("fields/status/stringValue", message); 
-      content.set("fields/rssi/doubleValue", radio.getRSSI());
-      content.set("fields/update_count/integerValue", messageCounter); 
+      LoRaNodeData receivedData;
+      memcpy(&receivedData, byteArr, sizeof(LoRaNodeData));
       
-      String documentPath = "sensors/my_first_sensor";
-      
-      if (Firebase.Firestore.patchDocument(&fbdo, PROJECT_ID, "", documentPath.c_str(), content.raw(), "status,rssi,update_count")) {
-        Serial.println("Success - cloud data updated");
-      } else {
-        Serial.print("Error saving in Firebase: ");
-        Serial.println(fbdo.errorReason());
+      Serial.println("Correct frame captured");
+      Serial.printf("Node ID: %u\n", receivedData.node_id);
+      Serial.printf("Type: %d, Licznik: %u, Stan: %d\n", receivedData.node_type, receivedData.msg_counter, receivedData.sensor_state);
+      Serial.printf("Aceelerometer: X: %d, Y: %d, Z: %d\n", receivedData.acc_x, receivedData.acc_y, receivedData.acc_z);
+      Serial.printf("Battery: %d %%, RSSI: %.1f dBm\n", receivedData.battery_lvl, radio.getRSSI());
+
+      blinkLed(1);
+
+      if (Firebase.ready()) {
+        Serial.println("Sending data to Firestore");
+        
+        FirebaseJson content;
+        content.set("fields/node_type/integerValue", receivedData.node_type);
+        content.set("fields/msg_counter/integerValue", receivedData.msg_counter);
+        content.set("fields/acc_x/integerValue", receivedData.acc_x);
+        content.set("fields/acc_y/integerValue", receivedData.acc_y);
+        content.set("fields/acc_z/integerValue", receivedData.acc_z);
+        content.set("fields/sensor_state/integerValue", receivedData.sensor_state);
+        content.set("fields/battery_lvl/integerValue", receivedData.battery_lvl);
+        content.set("fields/rssi/doubleValue", radio.getRSSI());
+        
+        String documentPath = "sensors/";
+        documentPath += receivedData.node_id;
+        String mask = "device_type,msg_counter,acc_x,acc_y,acc_z,sensor_state,battery_lvl,rssi";
+        
+        if (Firebase.Firestore.patchDocument(&fbdo, PROJECT_ID, "", documentPath.c_str(), content.raw(), mask.c_str())) {
+          Serial.println("Document updated");
+        } else {
+          Serial.print("Error during saving in Firebase: ");
+          Serial.println(fbdo.errorReason());
+        }
       }
+    } else {
+      Serial.println("Unknown frame received - rejecting");
     }
     
   } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
   } else {
-    Serial.print("Receive error, code: ");
+    Serial.print("Error druing receiving message: ");
     Serial.println(state);
   }
 }

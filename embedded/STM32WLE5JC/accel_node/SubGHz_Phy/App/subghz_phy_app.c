@@ -21,6 +21,7 @@
 #include "stm32_seq.h"
 #include "stm32_timer.h"
 #include <stdio.h>
+#include "lora_frame.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -57,6 +58,8 @@ static RadioEvents_t RadioEvents;
 
 /* USER CODE BEGIN PV */
 static UTIL_TIMER_Object_t txTimer;
+uint16_t global_msg_counter = 0;
+const uint32_t MY_NODE_ID = 4444;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -155,10 +158,6 @@ void SubghzApp_Init(void)
 static void OnTxDone(void)
 {
   /* USER CODE BEGIN OnTxDone */
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-
-    HAL_Delay(100);
-
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
 
 	UTIL_TIMER_Start(&txTimer);
@@ -192,11 +191,17 @@ static void OnRxError(void)
 /* USER CODE BEGIN PrFD */
 void Master_Radio_Send(void)
 {
-	int16_t x, y, z;
-	Read_ADXL345(&x, &y, &z);
-	uint8_t my_tx_buffer[32];
-	uint16_t payload_len = snprintf((char*)my_tx_buffer, sizeof(my_tx_buffer), "X:%d Y:%d Z:%d", x, y, z);
-	Radio.Send(my_tx_buffer, payload_len);
+	LoRaNodeData frame = {0};
+
+	frame.node_id = MY_NODE_ID;
+	frame.node_type = 1; // reed switch
+	frame.msg_counter = global_msg_counter++;
+	frame.battery_lvl = 95;
+
+	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
+
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+	Radio.Send((uint8_t*)&frame, sizeof(LoRaNodeData));
 }
 
 static void TxTimerCallback(void *context)
