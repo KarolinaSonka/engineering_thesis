@@ -65,7 +65,7 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin : HALL_Pin */
   GPIO_InitStruct.Pin = HALL_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(HALL_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : RF_CTRL1_Pin RF_CTRL2_Pin */

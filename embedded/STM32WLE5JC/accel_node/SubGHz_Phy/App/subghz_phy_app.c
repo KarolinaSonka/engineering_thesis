@@ -59,7 +59,7 @@ static RadioEvents_t RadioEvents;
 /* USER CODE BEGIN PV */
 static UTIL_TIMER_Object_t txTimer;
 uint16_t global_msg_counter = 0;
-const uint32_t MY_NODE_ID = 4444;
+const uint32_t MY_NODE_ID = 0000;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -194,7 +194,7 @@ void Master_Radio_Send(void)
 	LoRaNodeData frame = {0};
 
 	frame.node_id = MY_NODE_ID;
-	frame.node_type = 1; // reed switch
+	frame.node_type = 0; // accel only
 	frame.msg_counter = global_msg_counter++;
 	frame.battery_lvl = 95;
 

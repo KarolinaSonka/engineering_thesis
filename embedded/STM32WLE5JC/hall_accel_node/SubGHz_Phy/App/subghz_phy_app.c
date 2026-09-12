@@ -59,7 +59,7 @@ static RadioEvents_t RadioEvents;
 /* USER CODE BEGIN PV */
 static UTIL_TIMER_Object_t txTimer;
 uint16_t global_msg_counter = 0;
-const uint32_t MY_NODE_ID = 3333;
+const uint32_t MY_NODE_ID = 2222;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
