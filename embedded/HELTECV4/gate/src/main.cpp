@@ -24,152 +24,190 @@ FirebaseConfig config;
 
 SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
 
+struct QueueMessage {
+  LoRaNodeData data;
+  float rssi;
+};
+
+QueueHandle_t loraQueue;
+SemaphoreHandle_t serialMutex;
+
+volatile bool receivedFlag = false;
+
+#if defined(ESP8266) || defined(ESP32)
+  ICACHE_RAM_ATTR
+#endif
+void setFlag(void) {
+  receivedFlag = true;
+}
+
 void blinkLed(int times)
 {
     for (int i = 0; i < times; i++)
     {
         digitalWrite(LED_PIN, HIGH);
         delay(100);
-
         digitalWrite(LED_PIN, LOW);
         delay(100);
     }
 }
 
+void firebaseTask(void *pvParameters) {
+  QueueMessage msg;
+  
+  for(;;) {
+    if (xQueueReceive(loraQueue, &msg, portMAX_DELAY) == pdPASS) {
+      
+      blinkLed(1); 
+      
+      if (Firebase.ready()) {
+        xSemaphoreTake(serialMutex, portMAX_DELAY);
+        Serial.println("\n[Firebase Task] Uploading data to Firestore");
+        xSemaphoreGive(serialMutex);
+        
+        FirebaseJson content;
+        content.set("fields/node_type/integerValue", msg.data.node_type);
+        content.set("fields/msg_counter/integerValue", msg.data.msg_counter);
+        content.set("fields/acc_x/integerValue", msg.data.acc_x);
+        content.set("fields/acc_y/integerValue", msg.data.acc_y);
+        content.set("fields/acc_z/integerValue", msg.data.acc_z);
+        content.set("fields/sensor_state/integerValue", msg.data.sensor_state);
+        content.set("fields/battery_lvl/integerValue", msg.data.battery_lvl);
+        content.set("fields/rssi/doubleValue", msg.rssi);
+
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+          char timeStr[30];
+          strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+          content.set("fields/timestamp/timestampValue", timeStr);
+        }
+        
+        String documentPath = "sensors/";
+        documentPath += msg.data.node_id;
+        String updateMask = "node_type,msg_counter,acc_x,acc_y,acc_z,sensor_state,battery_lvl,rssi,timestamp";
+        
+        bool patchStatus = Firebase.Firestore.patchDocument(&fbdo, PROJECT_ID, "", documentPath.c_str(), content.raw(), updateMask.c_str());
+        
+        xSemaphoreTake(serialMutex, portMAX_DELAY);
+        if (patchStatus) {
+          Serial.println("[Firebase Task] Live data updated successfully");
+        } else {
+          Serial.print("[Firebase Task] patchDocument failed: ");
+          Serial.println(fbdo.errorReason());
+        }
+        xSemaphoreGive(serialMutex);
+
+        String historyPath = documentPath;
+        historyPath += "/readings";
+        
+        bool createStatus = Firebase.Firestore.createDocument(&fbdo, PROJECT_ID, "", historyPath.c_str(), content.raw());
+        
+        xSemaphoreTake(serialMutex, portMAX_DELAY);
+        if (createStatus) {
+          Serial.println("[Firebase Task] Historical record appended successfully");
+        } else {
+          Serial.print("[Firebase Task] createDocument failed: ");
+          Serial.println(fbdo.errorReason());
+        }
+        xSemaphoreGive(serialMutex);
+      }
+    }
+  }
+}
+
 void setup() {
   pinMode(VEXT_PIN, OUTPUT);
   digitalWrite(VEXT_PIN, LOW);
-  
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   
   Serial.begin(115200);
   delay(3000);
 
+  serialMutex = xSemaphoreCreateMutex();
+
+  xSemaphoreTake(serialMutex, portMAX_DELAY);
   Serial.print("Connecting with WiFi");
+  xSemaphoreGive(serialMutex);
+  
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
-
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
+    xSemaphoreTake(serialMutex, portMAX_DELAY);
     Serial.print(".");
+    xSemaphoreGive(serialMutex);
     delay(500);
   }
-  Serial.println();
-  Serial.println("Connected");
-
+  
+  xSemaphoreTake(serialMutex, portMAX_DELAY);
+  Serial.println("\nConnected");
   Serial.println("Synchronizing system time with NTP server");
+  xSemaphoreGive(serialMutex);
+  
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-
   config.api_key = API_KEY;
   config.token_status_callback = tokenStatusCallback; 
 
-  Serial.println("Anonymous registration");
-  if (Firebase.signUp(&config, &auth, "", "")) {
-    Serial.println("Authorization successful");
-  } else {
-    Serial.print("Authorization error: ");
-    Serial.println(config.signer.signupError.message.c_str());
-  }
-
+  Firebase.signUp(&config, &auth, "", "");
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
+  loraQueue = xQueueCreate(10, sizeof(QueueMessage));
+
+  xTaskCreatePinnedToCore(
+    firebaseTask, "FirebaseTask", 10000, NULL, 1, NULL, 0
+  );
+
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, -1);
-
-  Serial.println("Starting radio on HELTECV4");
-
   int state = radio.begin(868.0, 125.0, 7, 5, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 14, 8, 1.8f);
-
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.print("Radio init error: ");
+  radio.setDio2AsRfSwitch(true);
+  radio.setDio1Action(setFlag);
+  
+  state = radio.startReceive();
+  
+  xSemaphoreTake(serialMutex, portMAX_DELAY);
+  if (state == RADIOLIB_ERR_NONE) {
+    Serial.println("Radio initialized, waiting for messages");
+  } else {
+    Serial.print("Error starting receive: ");
     Serial.println(state);
-    while (true) {
-    }
-}
-
-  state = radio.setDio2AsRfSwitch(true);
-
-  if (state != RADIOLIB_ERR_NONE) {
-      Serial.print("RF switch config error: ");
-      Serial.println(state);
-      while (true) {}
-}
-
-Serial.println("Radio initialized - waiting for messages");
-blinkLed(3);
+  }
+  xSemaphoreGive(serialMutex);
+  
+  blinkLed(3);
 }
 
 void loop() {
-  uint8_t byteArr[sizeof(LoRaNodeData)];
-  int state = radio.receive(byteArr, sizeof(LoRaNodeData));
+  if (receivedFlag) {
+    receivedFlag = false; 
+    
+    uint8_t byteArr[sizeof(LoRaNodeData)];
+    
+    int state = radio.readData(byteArr, sizeof(LoRaNodeData));
 
-  if (state == RADIOLIB_ERR_NONE) {
-    if (radio.getPacketLength() == sizeof(LoRaNodeData)) {
-      
-      LoRaNodeData receivedData;
-      memcpy(&receivedData, byteArr, sizeof(LoRaNodeData));
-      
-      Serial.println("Correct frame captured");
-      Serial.printf("Node ID: %u\n", receivedData.node_id);
-      Serial.printf("Type: %d, Licznik: %u, Stan: %d\n", receivedData.node_type, receivedData.msg_counter, receivedData.sensor_state);
-      Serial.printf("Aceelerometer: X: %d, Y: %d, Z: %d\n", receivedData.acc_x, receivedData.acc_y, receivedData.acc_z);
-      Serial.printf("Battery: %d %%, RSSI: %.1f dBm\n", receivedData.battery_lvl, radio.getRSSI());
-
-      blinkLed(1);
-
-      if (Firebase.ready()) {
-        Serial.println("Uploading telemetry to Firestore...");
+    if (state == RADIOLIB_ERR_NONE) {
+      if (radio.getPacketLength() == sizeof(LoRaNodeData)) {
         
-        FirebaseJson content;
-        content.set("fields/node_type/integerValue", receivedData.node_type);
-        content.set("fields/msg_counter/integerValue", receivedData.msg_counter);
-        content.set("fields/acc_x/integerValue", receivedData.acc_x);
-        content.set("fields/acc_y/integerValue", receivedData.acc_y);
-        content.set("fields/acc_z/integerValue", receivedData.acc_z);
-        content.set("fields/sensor_state/integerValue", receivedData.sensor_state);
-        content.set("fields/battery_lvl/integerValue", receivedData.battery_lvl);
-        content.set("fields/rssi/doubleValue", radio.getRSSI());
-
-        // format ISO 8601 / RFC 3339 UTC timestamp required by Firestore
-        struct tm timeinfo;
-        if (getLocalTime(&timeinfo)) {
-          char timeStr[30];
-          strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
-          content.set("fields/timestamp/timestampValue", timeStr);
-        } else {
-          Serial.println("Warning: NTP time not yet synchronized");
-        }
+        QueueMessage msg;
+        memcpy(&msg.data, byteArr, sizeof(LoRaNodeData));
+        msg.rssi = radio.getRSSI();
         
-        String documentPath = "sensors/";
-        documentPath += receivedData.node_id;
-        String updateMask = "node_type,msg_counter,acc_x,acc_y,acc_z,sensor_state,battery_lvl,rssi,timestamp";
+        xSemaphoreTake(serialMutex, portMAX_DELAY);
+        Serial.println("\n[Radio Task] Correct frame captured");
+        Serial.printf("Node ID: %u, Licznik: %u, Stan: %d\n", msg.data.node_id, msg.data.msg_counter, msg.data.sensor_state);
+        xSemaphoreGive(serialMutex);
         
-        if (Firebase.Firestore.patchDocument(&fbdo, PROJECT_ID, "", documentPath.c_str(), content.raw(), updateMask.c_str())) {
-          Serial.println("Live document updated successfully");
-        } else {
-          Serial.print("patchDocument failed: ");
-          Serial.println(fbdo.errorReason());
-        }
-
-        String historyPath = documentPath;
-        historyPath += "/readings";
-        
-        if (Firebase.Firestore.createDocument(&fbdo, PROJECT_ID, "", historyPath.c_str(), content.raw())) {
-          Serial.println("Historical record appended successfully");
-        } else {
-          Serial.print("createDocument failed: ");
-          Serial.println(fbdo.errorReason());
+        if (xQueueSend(loraQueue, &msg, (TickType_t)10) != pdPASS) {
+          xSemaphoreTake(serialMutex, portMAX_DELAY);
+          Serial.println("[Radio Task] ERROR: Queue is full - dropping frame");
+          xSemaphoreGive(serialMutex);
         }
       }
-    } else {
-      Serial.println("Unknown frame received - rejecting");
     }
-    
-  } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
-  } else {
-    Serial.print("Error druing receiving message: ");
-    Serial.println(state);
+    radio.startReceive();
   }
+  
+  delay(1); 
 }

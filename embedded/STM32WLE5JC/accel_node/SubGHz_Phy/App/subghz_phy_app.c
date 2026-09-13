@@ -1,10 +1,10 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    subghz_phy_app.c
-  * @brief   Aplikacja SubGHz_Phy do cyklicznego wysyłania (LoRa P2P)
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    subghz_phy_app.c
+ * @brief   Aplikacja SubGHz_Phy do cyklicznego wysyłania (LoRa P2P)
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -22,6 +22,7 @@
 #include "stm32_timer.h"
 #include <stdio.h>
 #include "lora_frame.h"
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -58,8 +59,16 @@ static RadioEvents_t RadioEvents;
 
 /* USER CODE BEGIN PV */
 static UTIL_TIMER_Object_t txTimer;
+static UTIL_TIMER_Object_t cooldownTimer;
 uint16_t global_msg_counter = 0;
 const uint32_t MY_NODE_ID = 0000;
+
+volatile bool wake_from_exti = false;
+volatile bool wake_from_timer = false;
+volatile bool wake_from_cooldown = false;
+volatile bool is_cooling_down = false;
+
+static int16_t last_x = 0, last_y = 0, last_z = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -69,85 +78,81 @@ const uint32_t MY_NODE_ID = 0000;
 static void OnTxDone(void);
 
 /**
-  * @brief Function to be executed on Radio Rx Done event
-  * @param  payload ptr of buffer received
-  * @param  size buffer size
-  * @param  rssi
-  * @param  LoraSnr_FskCfo
-  */
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
+ * @brief Function to be executed on Radio Rx Done event
+ * @param  payload ptr of buffer received
+ * @param  size buffer size
+ * @param  rssi
+ * @param  LoraSnr_FskCfo
+ */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
+		int8_t LoraSnr_FskCfo);
 
 /**
-  * @brief Function executed on Radio Tx Timeout event
-  */
+ * @brief Function executed on Radio Tx Timeout event
+ */
 static void OnTxTimeout(void);
 
 /**
-  * @brief Function executed on Radio Rx Timeout event
-  */
+ * @brief Function executed on Radio Rx Timeout event
+ */
 static void OnRxTimeout(void);
 
 /**
-  * @brief Function executed on Radio Rx Error event
-  */
+ * @brief Function executed on Radio Rx Error event
+ */
 static void OnRxError(void);
 
 /* USER CODE BEGIN PFP */
 static void TxTimerCallback(void *context);
+static void CooldownTimerCallback(void *context);
 static void TxProcess(void);
 extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
-void SubghzApp_Init(void)
-{
-  /* USER CODE BEGIN SubghzApp_Init_1 */
+void SubghzApp_Init(void) {
+	/* USER CODE BEGIN SubghzApp_Init_1 */
 
-  /* USER CODE END SubghzApp_Init_1 */
+	/* USER CODE END SubghzApp_Init_1 */
 
-  /* Radio initialization */
-  RadioEvents.TxDone = OnTxDone;
-  RadioEvents.RxDone = OnRxDone;
-  RadioEvents.TxTimeout = OnTxTimeout;
-  RadioEvents.RxTimeout = OnRxTimeout;
-  RadioEvents.RxError = OnRxError;
+	/* Radio initialization */
+	RadioEvents.TxDone = OnTxDone;
+	RadioEvents.RxDone = OnRxDone;
+	RadioEvents.TxTimeout = OnTxTimeout;
+	RadioEvents.RxTimeout = OnRxTimeout;
+	RadioEvents.RxError = OnRxError;
 
-  Radio.Init(&RadioEvents);
+	Radio.Init(&RadioEvents);
 
-  /* USER CODE BEGIN SubghzApp_Init_2 */
+	/* USER CODE BEGIN SubghzApp_Init_2 */
 
+	Radio.SetChannel(RF_FREQUENCY);
+	Radio.SetTxConfig(MODEM_LORA,
+	TX_OUTPUT_POWER, 0,
+	LORA_BANDWIDTH,
+	LORA_SPREADING_FACTOR,
+	LORA_CODINGRATE,
+	LORA_PREAMBLE_LENGTH,
+	LORA_FIX_LENGTH_PAYLOAD_ON,
+	true, // CRC on
+			0,    // FreqHopOn
+			0,    // HopPeriod
+			LORA_IQ_INVERSION_ON, 3000  // TX timeout
+			);
 
-  Radio.SetChannel(RF_FREQUENCY);
-  Radio.SetTxConfig(
-      MODEM_LORA,
-      TX_OUTPUT_POWER,
-      0,
-      LORA_BANDWIDTH,
-      LORA_SPREADING_FACTOR,
-      LORA_CODINGRATE,
-      LORA_PREAMBLE_LENGTH,
-      LORA_FIX_LENGTH_PAYLOAD_ON,
-      true, // CRC on
-      0,    // FreqHopOn
-      0,    // HopPeriod
-      LORA_IQ_INVERSION_ON,
-      3000  // TX timeout
-  );
+	Radio.SetPublicNetwork(false);
 
+	UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
 
-  Radio.SetPublicNetwork(false);
+	UTIL_TIMER_Create(&txTimer, 180000, UTIL_TIMER_ONESHOT, TxTimerCallback,
+			NULL);
+	UTIL_TIMER_Create(&cooldownTimer, 10000, UTIL_TIMER_ONESHOT,
+			CooldownTimerCallback, NULL);
+	UTIL_TIMER_Start(&txTimer);
 
-  UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
-
-  UTIL_TIMER_Create(&txTimer,
-                    3000,
-                    UTIL_TIMER_ONESHOT,
-                    TxTimerCallback,
-                    NULL);
-
-
-  UTIL_TIMER_Start(&txTimer);
-  /* USER CODE END SubghzApp_Init_2 */
+	wake_from_timer = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+	/* USER CODE END SubghzApp_Init_2 */
 }
 
 /* USER CODE BEGIN EF */
@@ -155,62 +160,110 @@ void SubghzApp_Init(void)
 /* USER CODE END EF */
 
 /* Private functions ---------------------------------------------------------*/
-static void OnTxDone(void)
-{
-  /* USER CODE BEGIN OnTxDone */
+static void OnTxDone(void) {
+	/* USER CODE BEGIN OnTxDone */
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
 
 	UTIL_TIMER_Start(&txTimer);
-  /* USER CODE END OnTxDone */
+	/* USER CODE END OnTxDone */
 }
 
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
-{
-  /* USER CODE BEGIN OnRxDone */
-  /* USER CODE END OnRxDone */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
+		int8_t LoraSnr_FskCfo) {
+	/* USER CODE BEGIN OnRxDone */
+	/* USER CODE END OnRxDone */
 }
 
-static void OnTxTimeout(void)
-{
-  /* USER CODE BEGIN OnTxTimeout */
-  /* USER CODE END OnTxTimeout */
+static void OnTxTimeout(void) {
+	/* USER CODE BEGIN OnTxTimeout */
+	/* USER CODE END OnTxTimeout */
 }
 
-static void OnRxTimeout(void)
-{
-  /* USER CODE BEGIN OnRxTimeout */
-  /* USER CODE END OnRxTimeout */
+static void OnRxTimeout(void) {
+	/* USER CODE BEGIN OnRxTimeout */
+	/* USER CODE END OnRxTimeout */
 }
 
-static void OnRxError(void)
-{
-  /* USER CODE BEGIN OnRxError */
-  /* USER CODE END OnRxError */
+static void OnRxError(void) {
+	/* USER CODE BEGIN OnRxError */
+	/* USER CODE END OnRxError */
 }
 
 /* USER CODE BEGIN PrFD */
-void Master_Radio_Send(void)
-{
-	LoRaNodeData frame = {0};
+void Master_Radio_Send(void) {
+	LoRaNodeData frame = { 0 };
+	bool should_send = false;
+
+	bool is_exti = wake_from_exti;
+	bool is_timer = wake_from_timer;
+	bool is_cooldown = wake_from_cooldown;
+
+	wake_from_exti = false;
+	wake_from_timer = false;
+	wake_from_cooldown = false;
 
 	frame.node_id = MY_NODE_ID;
 	frame.node_type = 0; // accel only
-	frame.msg_counter = global_msg_counter++;
 	frame.battery_lvl = 95;
 
 	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
 
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-	Radio.Send((uint8_t*)&frame, sizeof(LoRaNodeData));
+	// resting state after 10 seconds without movement
+	if (is_cooldown) {
+		frame.sensor_state = 0;
+		should_send = true;
+	}
+
+	// routine msg every 3 minutes
+	if (is_timer) {
+		frame.sensor_state = 0;
+		last_x = frame.acc_x;
+		last_y = frame.acc_y;
+		last_z = frame.acc_z;
+		should_send = true;
+	}
+
+	// interrupt from pin
+	if (is_exti) {
+		last_x = frame.acc_x;
+		last_y = frame.acc_y;
+		last_z = frame.acc_z;
+
+		UTIL_TIMER_Start(&cooldownTimer); // +10s
+
+		if (is_cooling_down == false) {
+			frame.sensor_state = 1; // movement detected
+			should_send = true;
+			is_cooling_down = true;
+		}
+	}
+
+	if (should_send) {
+		frame.msg_counter = global_msg_counter++;
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+		Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
+	}
 }
 
-static void TxTimerCallback(void *context)
-{
-    UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+static void CooldownTimerCallback(void *context) {
+	is_cooling_down = false;
+	wake_from_cooldown = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 }
 
-static void TxProcess(void)
-{
-    Master_Radio_Send();
+static void TxTimerCallback(void *context) {
+	wake_from_timer = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+}
+
+static void TxProcess(void) {
+	Master_Radio_Send();
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == ADXL_INT1_Pin) {
+		wake_from_exti = true;
+		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+	}
 }
 /* USER CODE END PrFD */
