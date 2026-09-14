@@ -232,7 +232,7 @@ void Master_Radio_Send(void) {
 		UTIL_TIMER_Start(&cooldownTimer); // +10s
 
 		if (is_cooling_down == false) {
-			frame.sensor_state = 1; // movement detected
+			frame.sensor_state = 2; // movement detected
 			should_send = true;
 			is_cooling_down = true;
 		}

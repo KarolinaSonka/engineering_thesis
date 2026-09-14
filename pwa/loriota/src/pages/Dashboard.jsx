@@ -182,7 +182,7 @@ const Dashboard = () => {
             const is_vibrating = node.state === 2;
 
             if (node.type === 0) {
-              const has_vibration = node.state === 1 || node.state === 2;
+              const has_vibration = node.state === 2;
               const has_new_letter = false; 
               
               return (

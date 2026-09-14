@@ -45,7 +45,7 @@ const History = () => {
         const type = Number(data.node_type);
 
         if (type === 0) {
-          if (data.sensor_state === 1) {
+          if (data.sensor_state === 2) {
             activity = "Wykryto ruch / drgania";
             event_icon = Zap;
             icon_color = "text-amber-400";

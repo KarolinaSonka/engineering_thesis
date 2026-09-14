@@ -147,7 +147,7 @@ void SubghzApp_Init(void) {
 	UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
 
 	UTIL_TIMER_Create(&txTimer, 180000, UTIL_TIMER_ONESHOT, TxTimerCallback,
-			NULL); // 3 minutes
+	NULL); // 3 minutes
 	UTIL_TIMER_Create(&vibrationTimer, 10000, UTIL_TIMER_ONESHOT,
 			VibrationTimerCallback, NULL);
 
@@ -209,7 +209,6 @@ void Master_Radio_Send(void) {
 
 	frame.node_id = MY_NODE_ID;
 	frame.node_type = 2; // hall switch + accel
-	frame.msg_counter = global_msg_counter++;
 	frame.battery_lvl = 95;
 
 	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
@@ -254,9 +253,12 @@ void Master_Radio_Send(void) {
 	// vibrations
 	if (is_accel) {
 		if (is_door_closed) {
+			if (vibration_active == false) {
+				should_send = true;
+			}
+
 			vibration_active = true;
 			UTIL_TIMER_Start(&vibrationTimer);
-			should_send = true;
 		}
 	}
 
@@ -272,7 +274,7 @@ void Master_Radio_Send(void) {
 			// open
 			frame.sensor_state = VAL_OPEN;          // unsafe
 		}
-
+		frame.msg_counter = global_msg_counter++;
 		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
 		Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 	}
