@@ -58,42 +58,38 @@ const History = () => {
           }
         }
 
-        if (type === 1) {
-          if (data.sensor_state === 1) {
+        if (type === 1 || type === 2) {
+          if (data.sensor_state === 1) { // 1 = open
             activity = "Otwarte.";
             event_icon = Unlock; 
             icon_color = "text-[#d9652b]";
-            description = "Kontaktron nie wykrywa magnesu.";
-          } else {
+            description = type === 1 ? "Kontaktron nie wykrywa magnesu." : "Czujnik Halla nie wykrywa pola magnetycznego.";
+          } else if (data.sensor_state === 2) { // 2 = vibrations
+            activity = "Wykryto wstrząsy";
+            event_icon = Zap;
+            icon_color = "text-amber-400";
+            description = "Zarejestrowano wibracje w stanie zamknięcia.";
+          } else { // 0 = closed
             activity = "Zamknięte.";
             event_icon = Lock;
             icon_color = "text-[#4dc4c9]";
-            description = "Kontaktron wykrywa magnes.";
-          }
-        }
-
-        if (type === 2) {
-          if (data.sensor_state === 1) {
-            activity = "Otwarte.";
-            event_icon = Unlock; 
-            icon_color = "text-[#d9652b]";
-            description = "Czujnik Halla nie wykrywa pola magnetycznego.";
-          } else {
-            activity = "Zamknięte.";
-            event_icon = Lock;
-            icon_color = "text-[#4dc4c9]";
-            description = "Czujnik Halla wykrywa pole magnetyczne magnesu.";
+            description = type === 1 ? "Kontaktron wykrywa magnes." : "Czujnik Halla wykrywa pole magnetyczne.";
           }
         }
 
         if (type === 3) {
-          if (data.sensor_state === 1) {
-            activity = "Otwarte.";
+          if (data.sensor_state === 1) { // 1 = open
+            activity = "Otwarte";
             event_icon = Activity; 
+            icon_color = "text-[#d9652b]";
+            description = "Czujnik podczerwieni nie zarejestrował przeszkody.";
+          } else if (data.sensor_state === 2) { // 2 = vibrations
+            activity = "Wykryto wstrząsy";
+            event_icon = Zap;
             icon_color = "text-amber-400";
-            description = "Czujnik podczerwieni ma czystą linię widzenia.";
-          } else {
-            activity = "Zamknięte.";
+            description = "Zarejestrowano wibracje w stanie zamknięcia.";
+          } else { // 0 = closed
+            activity = "Zamknięte";
             event_icon = CheckCircle2;
             icon_color = "text-[#4dc4c9]";
             description = "Czujnik podczerwieni zarejestrował obiekt w zasięgu widzenia.";

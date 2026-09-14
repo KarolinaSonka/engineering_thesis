@@ -177,10 +177,12 @@ const Dashboard = () => {
             
             const is_offline = node.raw_date ? (time - node.raw_date) > (5 * 60 * 1000) : true;
             
+            const is_closed = node.state === 0;
             const is_open = node.state === 1;
+            const is_vibrating = node.state === 2;
 
             if (node.type === 0) {
-              const has_vibration = node.state === 1;
+              const has_vibration = node.state === 1 || node.state === 2;
               const has_new_letter = false; 
               
               return (
@@ -201,9 +203,9 @@ const Dashboard = () => {
                             {is_offline ? (
                               <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
                             ) : has_vibration ? (
-                              <span className="text-sm font-medium text-amber-400 flex items-center gap-1.5 whitespace-nowrap"><Activity size={14} /> Wykryto ruch!</span>
+                              <span className="text-sm font-medium text-amber-400 flex items-center gap-1.5 whitespace-nowrap"><Activity size={14} /> Wykryto wstrząsy!</span>
                             ) : (
-                              <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap">Czuwanie</span>
+                              <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Spoczynek</span>
                             )}
                           </div>
                         </div>
@@ -222,18 +224,28 @@ const Dashboard = () => {
               );
             }
 
-            if (node.type === 1) {
+            if (node.type === 1 || node.type === 2 || node.type === 3) {
+              
+              let IconOpen = node.type === 1 ? DoorOpen : node.type === 2 ? Unlock : Layout;
+              let IconClosed = node.type === 1 ? DoorClosed : node.type === 2 ? Lock : LayoutTemplate;
+
               return (
                 <div key={node.id} className={`relative overflow-hidden rounded-[32px] p-[1px] transition-all duration-500 w-full animate-in fade-in zoom-in-95 
-                  ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : is_open ? 'bg-gradient-to-r from-[#d9652b]/60 to-red-500/60 shadow-[0_0_30px_rgba(217,101,43,0.2)] scale-[1.02]' : 'bg-white/5'}`}>
-                  <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${is_open && !is_offline ? 'bg-[#1c120e]/80' : 'bg-[#151210]/60'}`}>
+                  ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : is_open ? 'bg-gradient-to-r from-[#d9652b]/60 to-red-500/60 shadow-[0_0_30px_rgba(217,101,43,0.2)] scale-[1.02]' : is_vibrating ? 'bg-gradient-to-r from-amber-400/60 to-yellow-500/60 shadow-[0_0_30px_rgba(245,158,11,0.2)] scale-[1.02]' : 'bg-white/5'}`}>
+                  
+                  <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${is_open && !is_offline ? 'bg-[#1c120e]/80' : is_vibrating && !is_offline ? 'bg-[#1c160e]/80' : 'bg-[#151210]/60'}`}>
+                    
                     {is_open && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-[#d9652b]/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
+                    {is_vibrating && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-amber-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
+                    
                     <div className="flex justify-between items-center mb-6 relative z-10">
                       <div className="flex items-center space-x-4 min-w-0">
+                        
                         <div className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center border shadow-inner transition-colors duration-300 
-                          ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : is_open ? 'bg-[#d9652b]/20 border-[#d9652b]/30 text-[#d9652b]' : 'bg-black/30 border-white/5 text-white/40'}`}>
-                          {is_open ? <DoorOpen size={24} /> : <DoorClosed size={24} />}
+                          ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : is_open ? 'bg-[#d9652b]/20 border-[#d9652b]/30 text-[#d9652b]' : is_vibrating ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : 'bg-black/30 border-white/5 text-white/40'}`}>
+                          {is_open ? <IconOpen size={24} /> : is_vibrating ? <Activity size={24} className="animate-pulse" /> : <IconClosed size={24} />}
                         </div>
+                        
                         <div className="min-w-0">
                           <h3 className={`text-lg font-light truncate ${is_offline ? 'text-white/50 line-through' : 'text-white'}`}>{node.name}</h3>
                           <div className="flex items-center space-x-1.5 mt-1">
@@ -241,6 +253,8 @@ const Dashboard = () => {
                               <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
                             ) : is_open ? (
                               <span className="text-sm font-medium text-[#d9652b] flex items-center gap-1.5 whitespace-nowrap"><AlertOctagon size={14} /> Otwarte</span>
+                            ) : is_vibrating ? (
+                              <span className="text-sm font-medium text-amber-400 flex items-center gap-1.5 whitespace-nowrap"><Activity size={14} /> Pukanie / Wstrząsy</span>
                             ) : (
                               <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Zamknięte</span>
                             )}
@@ -248,82 +262,7 @@ const Dashboard = () => {
                         </div>
                       </div>
                     </div>
-                    <div className={`flex items-center justify-between relative z-10 mt-auto ${is_offline ? 'opacity-30' : ''}`}>
-                      <div className="flex space-x-2">
-                        {batteryState(node.battery)}
-                        {signalPower(node.rssi)}
-                      </div>
-                      <span className="text-xs text-white/30 font-light">{node.last_update}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            }
-
-            if (node.type === 2) {
-              return (
-                <div key={node.id} className={`relative overflow-hidden rounded-[32px] p-[1px] transition-all duration-500 w-full animate-in fade-in zoom-in-95 
-                  ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : is_open ? 'bg-gradient-to-r from-blue-400/60 to-purple-500/60 shadow-[0_0_30px_rgba(59,130,246,0.2)] scale-[1.02]' : 'bg-white/5'}`}>
-                  <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${is_open && !is_offline ? 'bg-[#0f172a]/80' : 'bg-[#151210]/60'}`}>
-                    {is_open && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-blue-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
-                    <div className="flex justify-between items-center mb-6 relative z-10">
-                      <div className="flex items-center space-x-4 min-w-0">
-                        <div className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center border shadow-inner transition-colors duration-300 
-                          ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : is_open ? 'bg-blue-500/20 border-blue-500/30 text-blue-400' : 'bg-black/30 border-white/5 text-white/40'}`}>
-                          {is_open ? <Unlock size={24} /> : <Lock size={24} />}
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className={`text-lg font-light truncate ${is_offline ? 'text-white/50 line-through' : 'text-white'}`}>{node.name}</h3>
-                          <div className="flex items-center space-x-1.5 mt-1">
-                            {is_offline ? (
-                              <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
-                            ) : is_open ? (
-                              <span className="text-sm font-medium text-blue-400 flex items-center gap-1.5 whitespace-nowrap"><AlertOctagon size={14} /> Otwarte</span>
-                            ) : (
-                              <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Zamknięte</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className={`flex items-center justify-between relative z-10 mt-auto ${is_offline ? 'opacity-30' : ''}`}>
-                      <div className="flex space-x-2">
-                        {batteryState(node.battery)}
-                        {signalPower(node.rssi)}
-                      </div>
-                      <span className="text-xs text-white/30 font-light">{node.last_update}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            }
-
-            if (node.type === 3) {
-              return (
-                <div key={node.id} className={`relative overflow-hidden rounded-[32px] p-[1px] transition-all duration-500 w-full animate-in fade-in zoom-in-95 
-                  ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : is_open ? 'bg-gradient-to-r from-orange-400/60 to-red-500/60 shadow-[0_0_30px_rgba(249,115,22,0.2)] scale-[1.02]' : 'bg-white/5'}`}>
-                  <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${is_open && !is_offline ? 'bg-[#2a130c]/80' : 'bg-[#151210]/60'}`}>
-                    {is_open && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-orange-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
-                    <div className="flex justify-between items-center mb-6 relative z-10">
-                      <div className="flex items-center space-x-4 min-w-0">
-                        <div className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center border shadow-inner transition-colors duration-300 
-                          ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : is_open ? 'bg-orange-500/20 border-orange-500/30 text-orange-400' : 'bg-black/30 border-white/5 text-white/40'}`}>
-                          {is_open ? <Layout size={24} /> : <LayoutTemplate size={24} />}
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className={`text-lg font-light truncate ${is_offline ? 'text-white/50 line-through' : 'text-white'}`}>{node.name}</h3>
-                          <div className="flex items-center space-x-1.5 mt-1">
-                            {is_offline ? (
-                              <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
-                            ) : is_open ? (
-                              <span className="text-sm font-medium text-orange-400 flex items-center gap-1.5 whitespace-nowrap"><AlertOctagon size={14} /> Otwarta</span>
-                            ) : (
-                              <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Zamknięte</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    
                     <div className={`flex items-center justify-between relative z-10 mt-auto ${is_offline ? 'opacity-30' : ''}`}>
                       <div className="flex space-x-2">
                         {batteryState(node.battery)}

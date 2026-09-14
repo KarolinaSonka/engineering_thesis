@@ -11,7 +11,7 @@ typedef struct {
     int16_t  acc_x;        // X axis <-32768;32767> (2 bytes)
     int16_t  acc_y;        // Y axis (2 bytes)
     int16_t  acc_z;        // Z axis (2 bytes)
-    uint8_t  sensor_state; // state of digital sensor - ignored if node_type=0 (1 byte)
+    uint8_t  sensor_state; // state of digital sensor 0: open/idle, 1: closed/safe, 2: vibration/tampering (1 byte)
     uint8_t  battery_lvl;  // battery level (0%-100%) (1 byte)
 } LoRaNodeData;
 #pragma pack(pop)
