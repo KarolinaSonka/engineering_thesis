@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { db, auth } from '../firebaseConfig';
+import { signOut } from 'firebase/auth';
 import { 
   DoorOpen, DoorClosed, Mailbox, Battery, BatteryWarning,
   Wifi, Activity, CheckCircle2, AlertOctagon,
   Bell, Shield, ShieldAlert, Layers, Unlock, Lock,
   Layout, LayoutTemplate, Settings as SettingsIcon,
-  WifiOff 
+  WifiOff, LogOut 
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -15,6 +16,8 @@ const Dashboard = () => {
   
   const [nodes, setNodes] = useState({});
   const [location, setLocation] = useState('all'); 
+
+  const previousStates = useRef({});
 
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
@@ -40,7 +43,8 @@ const Dashboard = () => {
           }
         }
 
-        live_nodes[node_id] = {
+        const currentNodeData = {
+          ...data,
           id: node_id,
           name: data.custom_name || `Czujnik #${node_id}`, 
           type: Number(data.node_type), 
@@ -50,15 +54,39 @@ const Dashboard = () => {
           last_update: formatted_time,
           raw_date: raw_date, 
           location_tab: data.location_tab || 'unassigned',
-          acc_x: data.acc_x,
-          acc_y: data.acc_y,
-          acc_z: data.acc_z,
         };
+
+        live_nodes[node_id] = currentNodeData;
+
+        if (previousStates.current[node_id] !== undefined) {
+          const prevState = previousStates.current[node_id];
+          const currState = currentNodeData.state;
+
+          if (prevState !== currState && (currState === 1 || currState === 2)) {
+            if (Notification.permission === 'granted') {
+              const title = currState === 1 ? "🚨 Zmiana stanu!" : "⚠️ Wykryto niepokojącą aktywność!";
+              const body = currState === 1 ? `Otwarto ${currentNodeData.name}!` : `Wykryto wstrząsy na: ${currentNodeData.name}`;
+              
+              if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.ready.then(registration => {
+                  registration.showNotification(title, {
+                    body: body,
+                    icon: '/pwa-192x192.png',
+                    vibrate: [200, 100, 200]
+                  });
+                });
+              } else {
+                new Notification(title, { body: body, icon: '/pwa-192x192.png' });
+              }
+            }
+          }
+        }
+        previousStates.current[node_id] = currentNodeData.state;
       });
       
       setNodes(live_nodes);
     }, (error) => {
-        console.error("Błąd połączenia z bazą:", error);
+        console.error("Błąd połączenia z bazą Firestore:", error);
     });
 
     return () => {
@@ -125,6 +153,13 @@ const Dashboard = () => {
 
           <button className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center backdrop-blur-xl hover:bg-white/10 transition-colors shadow-lg">
             <Bell size={20} className="text-white/80" />
+          </button>
+
+          <button 
+            onClick={() => signOut(auth)}
+            className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center backdrop-blur-xl hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 transition-colors shadow-lg text-white/80"
+          >
+            <LogOut size={20} />
           </button>
         </div>
       </header>

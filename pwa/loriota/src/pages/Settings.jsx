@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore';
+import { db, messaging } from '../firebaseConfig';
+import { getToken } from 'firebase/messaging';
 import { 
   Settings as SettingsIcon, 
   Save, 
@@ -18,8 +19,10 @@ const Settings = () => {
   const [loading, setLoading] = useState(true);
   const [saving_id, setSavingId] = useState(null); 
   const [deleting_id, setDeletingId] = useState(null); 
-
   const [form_data, setFormData] = useState({});
+  
+  // Stan przełącznika powiadomień (domyślnie false, zmienia się po kliknięciu)
+  const [pushEnabled, setPushEnabled] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "sensors"), (snapshot) => {
@@ -87,6 +90,48 @@ const Settings = () => {
       console.error("Błąd podczas usuwania węzła:", error);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handlePushToggle = async () => {
+    try {
+      const isCurrentlyGranted = Notification.permission === 'granted' && pushEnabled;
+
+      if (isCurrentlyGranted) {
+        const currentToken = await getToken(messaging, { 
+          vapidKey: 'BDg2d1Lb39u3e0SGQEC7DgJ-C_eeTjQ7ctKDITA956y-FzO2nk9vcpP1RmONa6B_GHEabvfPKHWOjh7PWZJIa2w' 
+        });
+        
+        if (currentToken) {
+          await deleteDoc(doc(db, 'fcm_tokens', currentToken));
+        }
+
+        setPushEnabled(false);
+        alert('Powiadomienia zostały wyłączone dla tego urządzenia.');
+
+      } else {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          const token = await getToken(messaging, { 
+            vapidKey: 'BDg2d1Lb39u3e0SGQEC7DgJ-C_eeTjQ7ctKDITA956y-FzO2nk9vcpP1RmONa6B_GHEabvfPKHWOjh7PWZJIa2w' 
+          });
+          
+          await setDoc(doc(db, 'fcm_tokens', token), {
+            token: token,
+            createdAt: new Date(),
+            platform: navigator.userAgent
+          });
+
+          setPushEnabled(true);
+          alert('Powiadomienia pomyślnie aktywowane!');
+        } else {
+          alert('Brak zgody na powiadomienia w przeglądarce.');
+          setPushEnabled(false);
+        }
+      }
+    } catch (error) {
+      console.error('Błąd przełączania powiadomień:', error);
+      alert('Wystąpił błąd podczas zmiany ustawień powiadomień.');
     }
   };
 
@@ -209,9 +254,14 @@ const Settings = () => {
                 <p className="text-xs text-white/40 mt-0.5">Otrzymuj natychmiastowe alerty na telefon</p>
               </div>
             </div>
-            <div className="w-12 h-6 rounded-full bg-[#4dc4c9] relative cursor-pointer opacity-50 hover:opacity-100 transition-opacity">
-               <div className="absolute right-1 top-1 w-4 h-4 rounded-full bg-white shadow-sm"></div>
+
+            <div 
+              onClick={handlePushToggle}
+              className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors duration-300 ${pushEnabled ? 'bg-[#4dc4c9]' : 'bg-white/10 hover:bg-white/20'}`}
+            >
+               <div className={`absolute top-1 w-4 h-4 rounded-full shadow-sm transition-all duration-300 ${pushEnabled ? 'right-1 bg-white' : 'left-1 bg-white/50'}`}></div>
             </div>
+
           </div>
           <div className="flex items-center justify-between p-4">
             <div className="flex items-center gap-3">
