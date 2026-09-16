@@ -8,3 +8,15 @@ createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>,
 )
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/firebase-messaging-sw.js')
+      .then((registration) => {
+        console.log('Service Worker zarejestrowany sukcesem:', registration.scope);
+      })
+      .catch((err) => {
+        console.log('Rejestracja Service Workera nie powiodła się:', err);
+      });
+  });
+}

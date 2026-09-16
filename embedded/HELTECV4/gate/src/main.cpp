@@ -6,6 +6,7 @@
 #include <addons/TokenHelper.h>
 #include "sensitive_data.h"
 #include "lora_frame.h"
+#include <map>
 
 FirebaseData fbdo;
 FirebaseAuth auth;
@@ -33,6 +34,8 @@ QueueHandle_t loraQueue;
 SemaphoreHandle_t serialMutex;
 
 volatile bool receivedFlag = false;
+unsigned long lastAlarmTime = 0;
+std::map<uint16_t, int> previousSensorStates;
 
 #if defined(ESP8266) || defined(ESP32)
   ICACHE_RAM_ATTR
@@ -41,14 +44,70 @@ void setFlag(void) {
   receivedFlag = true;
 }
 
-void blinkLed(int times)
-{
-    for (int i = 0; i < times; i++)
-    {
+void blinkLed(int times) {
+    for (int i = 0; i < times; i++) {
         digitalWrite(LED_PIN, HIGH);
         delay(100);
         digitalWrite(LED_PIN, LOW);
         delay(100);
+    }
+}
+
+void sendAlarmNotification(int state) {
+    xSemaphoreTake(serialMutex, portMAX_DELAY);
+    Serial.println("\n[FCM] Sending notification...");
+    xSemaphoreGive(serialMutex);
+
+    String documentPath = "config/device"; 
+    
+    if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), "")) {
+        FirebaseJson responseJson;
+        responseJson.setJsonData(fbdo.payload().c_str());
+        
+        int i = 0;
+        int successCount = 0;
+        
+        while (true) {
+            FirebaseJsonData tokenData;
+            String path = "fields/tokens/arrayValue/values/[";
+            path += String(i);
+            path += "]/stringValue";
+            responseJson.get(tokenData, path);
+            
+            if (!tokenData.success) {
+                break; 
+            }
+            
+            String phoneToken = tokenData.stringValue;
+            
+            if (phoneToken.length() > 10) {
+                    FCM_HTTPv1_JSON_Message msg;
+                    msg.token = phoneToken;
+                    msg.notification.title = "🚨 ALARM LORIOTA!";
+                    
+                    if (state == 1) {
+                        msg.notification.body = "Wykryto otwarcie! Sprawdź aplikację.";
+                    } else if (state == 2) {
+                        msg.notification.body = "Wykryto drgania! Sprawdź aplikację.";
+                    } else {
+                        msg.notification.body = "Wykryto aktywność czujnika!";
+                    }
+                    
+                    String appUrl = "https://loriota-8d71a.web.app"; 
+                  
+                    msg.webpush.fcm_options.link = appUrl;
+                    msg.android.priority = "high";
+                    
+                    if (Firebase.FCM.send(&fbdo, &msg)) {
+                        successCount++;
+                    }
+                }
+            i++;
+        }
+        
+        xSemaphoreTake(serialMutex, portMAX_DELAY);
+        Serial.printf("[FCM] Notification sent to %d devices.\n", successCount);
+        xSemaphoreGive(serialMutex);
     }
 }
 
@@ -86,7 +145,7 @@ void firebaseTask(void *pvParameters) {
         documentPath += msg.data.node_id;
         String updateMask = "node_type,msg_counter,acc_x,acc_y,acc_z,sensor_state,battery_lvl,rssi,timestamp";
         
-        bool patchStatus = Firebase.Firestore.patchDocument(&fbdo, PROJECT_ID, "", documentPath.c_str(), content.raw(), updateMask.c_str());
+        bool patchStatus = Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), content.raw(), updateMask.c_str());
         
         xSemaphoreTake(serialMutex, portMAX_DELAY);
         if (patchStatus) {
@@ -100,7 +159,7 @@ void firebaseTask(void *pvParameters) {
         String historyPath = documentPath;
         historyPath += "/readings";
         
-        bool createStatus = Firebase.Firestore.createDocument(&fbdo, PROJECT_ID, "", historyPath.c_str(), content.raw());
+        bool createStatus = Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "", historyPath.c_str(), content.raw());
         
         xSemaphoreTake(serialMutex, portMAX_DELAY);
         if (createStatus) {
@@ -110,6 +169,28 @@ void firebaseTask(void *pvParameters) {
           Serial.println(fbdo.errorReason());
         }
         xSemaphoreGive(serialMutex);
+
+        uint16_t current_id = msg.data.node_id;
+        int current_state = msg.data.sensor_state;
+
+        if (previousSensorStates.find(current_id) == previousSensorStates.end()) {
+            previousSensorStates[current_id] = 0;
+        }
+
+        int prev_state = previousSensorStates[current_id];
+
+        if (current_state != prev_state && (current_state == 1 || current_state == 2)) {
+            if (millis() - lastAlarmTime > 30000 || lastAlarmTime == 0) {
+                sendAlarmNotification(current_state);
+                lastAlarmTime = millis();
+            } else {
+                xSemaphoreTake(serialMutex, portMAX_DELAY);
+                Serial.println("[FCM] State changed but new msg is considered as a spam.");
+                xSemaphoreGive(serialMutex);
+            }
+        }
+
+        previousSensorStates[current_id] = current_state;
       }
     }
   }
@@ -147,10 +228,14 @@ void setup() {
   xSemaphoreGive(serialMutex);
   
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  config.api_key = API_KEY;
+  
+  config.service_account.data.client_email = FIREBASE_CLIENT_EMAIL;
+  config.service_account.data.project_id = FIREBASE_PROJECT_ID;
+  config.service_account.data.private_key = FIREBASE_PRIVATE_KEY;
+  
+  config.signer.tokens.scope = "https://www.googleapis.com/auth/firebase.messaging, https://www.googleapis.com/auth/datastore";
   config.token_status_callback = tokenStatusCallback; 
 
-  Firebase.signUp(&config, &auth, "", "");
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
@@ -196,7 +281,7 @@ void loop() {
         
         xSemaphoreTake(serialMutex, portMAX_DELAY);
         Serial.println("\n[Radio Task] Correct frame captured");
-        Serial.printf("Node ID: %u, Licznik: %u, Stan: %d\n", msg.data.node_id, msg.data.msg_counter, msg.data.sensor_state);
+        Serial.printf("Node ID: %u, Counter: %u, State: %d\n", msg.data.node_id, msg.data.msg_counter, msg.data.sensor_state);
         xSemaphoreGive(serialMutex);
         
         if (xQueueSend(loraQueue, &msg, (TickType_t)10) != pdPASS) {

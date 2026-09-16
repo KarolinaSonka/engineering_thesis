@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db, messaging } from '../firebaseConfig';
 import { getToken } from 'firebase/messaging';
 import { 
@@ -20,9 +20,13 @@ const Settings = () => {
   const [saving_id, setSavingId] = useState(null); 
   const [deleting_id, setDeletingId] = useState(null); 
   const [form_data, setFormData] = useState({});
-  
-  // Stan przełącznika powiadomień (domyślnie false, zmienia się po kliknięciu)
   const [pushEnabled, setPushEnabled] = useState(false);
+
+  useEffect(() => {
+    if (Notification.permission === 'granted') {
+      setPushEnabled(true);
+    }
+  }, []);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "sensors"), (snapshot) => {
@@ -96,19 +100,17 @@ const Settings = () => {
   const handlePushToggle = async () => {
     try {
       const isCurrentlyGranted = Notification.permission === 'granted' && pushEnabled;
+      const currentToken = await getToken(messaging, { 
+        vapidKey: 'BDg2d1Lb39u3e0SGQEC7DgJ-C_eeTjQ7ctKDITA956y-FzO2nk9vcpP1RmONa6B_GHEabvfPKHWOjh7PWZJIa2w' 
+      }).catch(() => null);
 
-      if (isCurrentlyGranted) {
-        const currentToken = await getToken(messaging, { 
-          vapidKey: 'BDg2d1Lb39u3e0SGQEC7DgJ-C_eeTjQ7ctKDITA956y-FzO2nk9vcpP1RmONa6B_GHEabvfPKHWOjh7PWZJIa2w' 
-        });
-        
-        if (currentToken) {
-          await deleteDoc(doc(db, 'fcm_tokens', currentToken));
-        }
+      if (isCurrentlyGranted && currentToken) {
+        await setDoc(doc(db, 'config', 'device'), {
+          tokens: arrayRemove(currentToken)
+        }, { merge: true });
 
         setPushEnabled(false);
         alert('Powiadomienia zostały wyłączone dla tego urządzenia.');
-
       } else {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
@@ -116,22 +118,21 @@ const Settings = () => {
             vapidKey: 'BDg2d1Lb39u3e0SGQEC7DgJ-C_eeTjQ7ctKDITA956y-FzO2nk9vcpP1RmONa6B_GHEabvfPKHWOjh7PWZJIa2w' 
           });
           
-          await setDoc(doc(db, 'fcm_tokens', token), {
-            token: token,
-            createdAt: new Date(),
-            platform: navigator.userAgent
-          });
+          if (token) {
+            await setDoc(doc(db, 'config', 'device'), {
+              tokens: arrayUnion(token), 
+              updatedAt: new Date()
+            }, { merge: true });
 
-          setPushEnabled(true);
-          alert('Powiadomienia pomyślnie aktywowane!');
+            setPushEnabled(true);
+            alert('Powiadomienia pomyślnie aktywowane!');
+          }
         } else {
-          alert('Brak zgody na powiadomienia w przeglądarce.');
           setPushEnabled(false);
         }
       }
     } catch (error) {
       console.error('Błąd przełączania powiadomień:', error);
-      alert('Wystąpił błąd podczas zmiany ustawień powiadomień.');
     }
   };
 

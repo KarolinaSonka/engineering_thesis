@@ -57,30 +57,7 @@ const Dashboard = () => {
         };
 
         live_nodes[node_id] = currentNodeData;
-
-        if (previousStates.current[node_id] !== undefined) {
-          const prevState = previousStates.current[node_id];
-          const currState = currentNodeData.state;
-
-          if (prevState !== currState && (currState === 1 || currState === 2)) {
-            if (Notification.permission === 'granted') {
-              const title = currState === 1 ? "🚨 Zmiana stanu!" : "⚠️ Wykryto niepokojącą aktywność!";
-              const body = currState === 1 ? `Otwarto ${currentNodeData.name}!` : `Wykryto wstrząsy na: ${currentNodeData.name}`;
-              
-              if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-                navigator.serviceWorker.ready.then(registration => {
-                  registration.showNotification(title, {
-                    body: body,
-                    icon: '/pwa-192x192.png',
-                    vibrate: [200, 100, 200]
-                  });
-                });
-              } else {
-                new Notification(title, { body: body, icon: '/pwa-192x192.png' });
-              }
-            }
-          }
-        }
+        
         previousStates.current[node_id] = currentNodeData.state;
       });
       
