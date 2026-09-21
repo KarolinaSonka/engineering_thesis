@@ -18,11 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "dma.h"
+#include "adc.h"
 #include "i2c.h"
 #include "rtc.h"
 #include "app_subghz_phy.h"
-#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -91,11 +90,10 @@ int main(void) {
 
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
-	MX_DMA_Init();
-	MX_USART1_UART_Init();
 	MX_RTC_Init();
 	MX_SubGHz_Phy_Init();
 	MX_I2C2_Init();
+	MX_ADC_Init();
 	/* USER CODE BEGIN 2 */
 	uint8_t adxl_init_data = 0x08;
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &adxl_init_data, 1, 100);
@@ -124,6 +122,9 @@ int main(void) {
 	// dummy read to clear any pending interrupts on start
 	uint8_t dummy = 0;
 	HAL_I2C_Mem_Read(&hi2c2, 0xA6, 0x30, 1, &dummy, 1, 100);
+
+	val = 0x1A; // low power
+	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2C, 1, &val, 1, 100);
 
 	// start measurement mode
 	val = 0x08;

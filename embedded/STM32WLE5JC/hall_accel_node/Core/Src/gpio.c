@@ -38,6 +38,8 @@
         * Output
         * EVENT_OUT
         * EXTI
+     PB7   ------> USART1_RX
+     PB6   ------> USART1_TX
 */
 void MX_GPIO_Init(void)
 {
@@ -54,6 +56,14 @@ void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, RF_CTRL1_Pin|RF_CTRL2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : PB7 PB6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_6;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LED_Pin */
   GPIO_InitStruct.Pin = LED_Pin;

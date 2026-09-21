@@ -132,7 +132,7 @@ void firebaseTask(void *pvParameters) {
         content.set("fields/acc_z/integerValue", msg.data.acc_z);
         content.set("fields/sensor_state/integerValue", msg.data.sensor_state);
         content.set("fields/battery_lvl/integerValue", msg.data.battery_lvl);
-        content.set("fields/rssi/doubleValue", msg.rssi);
+        content.set("fields/rssi/integerValue", (int)msg.rssi);
 
         struct tm timeinfo;
         if (getLocalTime(&timeinfo)) {
@@ -277,7 +277,7 @@ void loop() {
         
         QueueMessage msg;
         memcpy(&msg.data, byteArr, sizeof(LoRaNodeData));
-        msg.rssi = radio.getRSSI();
+        msg.rssi = radio.getRSSI(false);
         
         xSemaphoreTake(serialMutex, portMAX_DELAY);
         Serial.println("\n[Radio Task] Correct frame captured");
