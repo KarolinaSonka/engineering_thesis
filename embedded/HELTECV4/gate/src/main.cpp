@@ -68,6 +68,7 @@ void sendAlarmNotification(int state) {
         int successCount = 0;
         
         while (true) {
+            delay(20);
             FirebaseJsonData tokenData;
             String path = "fields/tokens/arrayValue/values/[";
             path += String(i);
@@ -81,27 +82,35 @@ void sendAlarmNotification(int state) {
             String phoneToken = tokenData.stringValue;
             
             if (phoneToken.length() > 10) {
-                    FCM_HTTPv1_JSON_Message msg;
-                    msg.token = phoneToken;
-                    msg.notification.title = "🚨 ALARM LORIOTA!";
-                    
-                    if (state == 1) {
-                        msg.notification.body = "Wykryto otwarcie! Sprawdź aplikację.";
-                    } else if (state == 2) {
-                        msg.notification.body = "Wykryto drgania! Sprawdź aplikację.";
-                    } else {
-                        msg.notification.body = "Wykryto aktywność czujnika!";
-                    }
-                    
-                    String appUrl = "https://loriota-8d71a.web.app"; 
-                  
-                    msg.webpush.fcm_options.link = appUrl;
-                    msg.android.priority = "high";
-                    
-                    if (Firebase.FCM.send(&fbdo, &msg)) {
-                        successCount++;
-                    }
+                FCM_HTTPv1_JSON_Message msg;
+                msg.token = phoneToken;
+                msg.notification.title = "🚨 ALARM LORIOTA!";
+
+                if (state == 1) {
+                    msg.notification.body = "Wykryto otwarcie! Sprawdź aplikację.";
+                } else if (state == 2) {
+                    msg.notification.body = "Wykryto drgania! Sprawdź aplikację.";
+                } else {
+                    msg.notification.body = "Wykryto aktywność czujnika!";
                 }
+
+                String appUrl = "https://loriota-8d71a.web.app"; 
+                msg.webpush.fcm_options.link = appUrl;
+
+                msg.android.priority = "high";
+                msg.webpush.headers = "{\"Urgency\":\"high\"}";
+
+                FirebaseJson customWebPush;
+                customWebPush.set("notification/requireInteraction", true);
+                customWebPush.set("notification/vibrate/[0]", 300);
+                customWebPush.set("notification/vibrate/[1]", 200);
+                customWebPush.set("notification/vibrate/[2]", 300);
+                msg.webpush.notification = customWebPush.raw();
+
+                if (Firebase.FCM.send(&fbdo, &msg)) {
+                    successCount++;
+                }
+            }
             i++;
         }
         
@@ -146,6 +155,7 @@ void firebaseTask(void *pvParameters) {
         String updateMask = "node_type,msg_counter,acc_x,acc_y,acc_z,sensor_state,battery_lvl,rssi,timestamp";
         
         bool patchStatus = Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), content.raw(), updateMask.c_str());
+        delay(50);
         
         xSemaphoreTake(serialMutex, portMAX_DELAY);
         if (patchStatus) {
@@ -160,6 +170,7 @@ void firebaseTask(void *pvParameters) {
         historyPath += "/readings";
         
         bool createStatus = Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "", historyPath.c_str(), content.raw());
+        delay(50);
         
         xSemaphoreTake(serialMutex, portMAX_DELAY);
         if (createStatus) {
@@ -180,12 +191,12 @@ void firebaseTask(void *pvParameters) {
         int prev_state = previousSensorStates[current_id];
 
         if (current_state != prev_state && (current_state == 1 || current_state == 2)) {
-            if (millis() - lastAlarmTime > 30000 || lastAlarmTime == 0) {
+            if (millis() - lastAlarmTime > 2000 || lastAlarmTime == 0) {
                 sendAlarmNotification(current_state);
                 lastAlarmTime = millis();
             } else {
                 xSemaphoreTake(serialMutex, portMAX_DELAY);
-                Serial.println("[FCM] State changed but new msg is considered as a spam.");
+                Serial.println("[FCM] Notification rejected (<2s).");
                 xSemaphoreGive(serialMutex);
             }
         }
@@ -242,7 +253,7 @@ void setup() {
   loraQueue = xQueueCreate(10, sizeof(QueueMessage));
 
   xTaskCreatePinnedToCore(
-    firebaseTask, "FirebaseTask", 10000, NULL, 1, NULL, 0
+    firebaseTask, "FirebaseTask", 10000, NULL, 1, NULL, 1
   );
 
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, -1);

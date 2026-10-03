@@ -7,7 +7,6 @@ import {
   Save, 
   Bell, 
   Smartphone, 
-  Mail, 
   Shield, 
   ShieldAlert,
   Cpu,
@@ -245,7 +244,7 @@ const Settings = () => {
         </h2>
         
         <div className="bg-white/5 border border-white/10 rounded-2xl p-2 backdrop-blur-md">
-          <div className="flex items-center justify-between p-4 border-b border-white/5">
+          <div className="flex items-center justify-between p-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-400">
                 <Smartphone size={20} />
@@ -261,21 +260,6 @@ const Settings = () => {
               className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors duration-300 ${pushEnabled ? 'bg-[#4dc4c9]' : 'bg-white/10 hover:bg-white/20'}`}
             >
                <div className={`absolute top-1 w-4 h-4 rounded-full shadow-sm transition-all duration-300 ${pushEnabled ? 'right-1 bg-white' : 'left-1 bg-white/50'}`}></div>
-            </div>
-
-          </div>
-          <div className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-orange-500/10 flex items-center justify-center text-orange-400">
-                <Mail size={20} />
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-white">E-mail (Raporty)</h3>
-                <p className="text-xs text-white/40 mt-0.5">Dzienne podsumowania aktywności</p>
-              </div>
-            </div>
-            <div className="w-12 h-6 rounded-full bg-white/10 relative cursor-pointer hover:bg-white/20 transition-colors">
-               <div className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white/50 shadow-sm"></div>
             </div>
           </div>
         </div>
