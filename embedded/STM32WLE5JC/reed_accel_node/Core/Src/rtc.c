@@ -101,7 +101,12 @@ void HAL_RTC_MspInit(RTC_HandleTypeDef* rtcHandle)
     __HAL_RCC_RTCAPB_CLK_ENABLE();
   /* USER CODE BEGIN RTC_MspInit 1 */
     HAL_NVIC_SetPriority(RTC_Alarm_IRQn, 0, 0);
+
+    __HAL_RTC_ALARM_CLEAR_FLAG(rtcHandle, RTC_FLAG_ALRAF);
+    __HAL_RTC_ALARM_CLEAR_FLAG(rtcHandle, RTC_FLAG_ALRBF);
+
     HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
+    //HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
   /* USER CODE END RTC_MspInit 1 */
   }
 }

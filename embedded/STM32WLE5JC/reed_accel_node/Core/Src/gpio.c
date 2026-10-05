@@ -81,7 +81,7 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin : REED_Pin */
   GPIO_InitStruct.Pin = REED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(REED_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : RF_CTRL1_Pin RF_CTRL2_Pin */
