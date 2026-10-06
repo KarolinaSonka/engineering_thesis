@@ -172,16 +172,21 @@ static void OnTxDone(void) {
 static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		int8_t LoraSnr_FskCfo) {
 	/* USER CODE BEGIN OnRxDone */
+	Radio.Sleep();
+	UTIL_TIMER_Start(&txTimer);
 	/* USER CODE END OnRxDone */
 }
 
 static void OnTxTimeout(void) {
 	/* USER CODE BEGIN OnTxTimeout */
+	Radio.Sleep();
+	UTIL_TIMER_Start(&txTimer);
 	/* USER CODE END OnTxTimeout */
 }
 
 static void OnRxTimeout(void) {
 	/* USER CODE BEGIN OnRxTimeout */
+	Radio.Sleep();
 	/* USER CODE END OnRxTimeout */
 }
 
@@ -207,13 +212,22 @@ void Master_Radio_Send(void) {
 
 	frame.node_id = MY_NODE_ID;
 	frame.node_type = 1; // reed switch
+
+	ADC_ChannelConfTypeDef sConfig = { 0 };
+	sConfig.Channel = ADC_CHANNEL_VREFINT;
+	sConfig.Rank = ADC_REGULAR_RANK_1;
+	sConfig.SamplingTime = ADC_SAMPLETIME_160CYCLES_5;
+	HAL_ADC_ConfigChannel(&hadc, &sConfig);
+
+	HAL_Delay(1);
+
 	HAL_ADC_Start(&hadc);
-	if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK) {
+	if (HAL_ADC_PollForConversion(&hadc, 100) == HAL_OK) {
 		uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
 		uint32_t battery_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
 				ADC_RESOLUTION_12B);
 
-		int32_t bat_percent = ((battery_mV - 2500) * 100) / (3000 - 2500);
+		int32_t bat_percent = ((battery_mV - 2200) * 100) / (3000 - 2200);
 
 		if (bat_percent > 100)
 			bat_percent = 100;
@@ -228,18 +242,7 @@ void Master_Radio_Send(void) {
 
 	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
 
-	GPIO_InitTypeDef GPIO_InitStruct = { 0 };
-	GPIO_InitStruct.Pin = REED_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_PULLUP;
-	HAL_GPIO_Init(REED_GPIO_Port, &GPIO_InitStruct);
-
-	HAL_Delay(2);
-
 	uint8_t current_reed = HAL_GPIO_ReadPin(REED_GPIO_Port, REED_Pin);
-
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	HAL_GPIO_Init(REED_GPIO_Port, &GPIO_InitStruct);
 
 	uint8_t VAL_CLOSED = 0;    // magnet
 	uint8_t VAL_OPEN = 1;      // no magnet
@@ -278,17 +281,17 @@ void Master_Radio_Send(void) {
 
 	// vibrations
 	if (is_accel) {
-			if (!is_door_closed) {
+		if (!is_door_closed) {
+			should_send = true;
+			vibration_active = false;
+		} else {
+			if (vibration_active == false) {
 				should_send = true;
-				vibration_active = false;
-			} else {
-				if (vibration_active == false) {
-					should_send = true;
-				}
-				vibration_active = true;
-				UTIL_TIMER_Start(&vibrationTimer);
 			}
+			vibration_active = true;
+			UTIL_TIMER_Start(&vibrationTimer);
 		}
+	}
 
 	if (should_send) {
 		if (is_door_closed) {
