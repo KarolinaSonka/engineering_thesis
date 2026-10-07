@@ -123,12 +123,14 @@ int main(void) {
 	uint8_t dummy = 0;
 	HAL_I2C_Mem_Read(&hi2c2, 0xA6, 0x30, 1, &dummy, 1, 100);
 
-	val = 0x1A; // low power
+	val = 0x17; // 12.5 Hz, low power
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2C, 1, &val, 1, 100);
 
 	// start measurement mode
 	val = 0x08;
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &val, 1, 100);
+
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
@@ -137,6 +139,10 @@ int main(void) {
 		/* USER CODE END WHILE */
 		MX_SubGHz_Phy_Process();
 
+		 HAL_PWR_EnterSLEEPMode(
+		        PWR_MAINREGULATOR_ON,
+		        PWR_SLEEPENTRY_WFI
+		    );
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */

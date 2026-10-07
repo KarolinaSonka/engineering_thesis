@@ -36,7 +36,7 @@ extern ADC_HandleTypeDef hadc;
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define TX_OUTPUT_POWER                             14        /* dBm */
+#define TX_OUTPUT_POWER                             2        /* dBm */
 #define LORA_BANDWIDTH                              0         /* [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved] */
 #define LORA_SPREADING_FACTOR                       7         /* [SF7..SF12] */
 #define LORA_CODINGRATE                             1         /* [1: 4/5, 2: 4/6, 3: 4/7, 4: 4/8] */
@@ -145,8 +145,8 @@ void SubghzApp_Init(void)
 
 	UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
 
-	UTIL_TIMER_Create(&txTimer, 180000, UTIL_TIMER_ONESHOT, TxTimerCallback,
-	NULL); // 3 minutes
+	UTIL_TIMER_Create(&txTimer, 900000, UTIL_TIMER_ONESHOT, TxTimerCallback,
+	NULL);
 	UTIL_TIMER_Create(&vibrationTimer, 10000, UTIL_TIMER_ONESHOT,
 			VibrationTimerCallback, NULL);
 
@@ -154,6 +154,8 @@ void SubghzApp_Init(void)
 
 	wake_from_timer = true;
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+
+	Radio.Sleep();
   /* USER CODE END SubghzApp_Init_2 */
 }
 
@@ -165,33 +167,41 @@ void SubghzApp_Init(void)
 static void OnTxDone(void)
 {
   /* USER CODE BEGIN OnTxDone */
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
+//	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
 
 	UTIL_TIMER_Start(&txTimer);
+
+	Radio.Sleep();
   /* USER CODE END OnTxDone */
 }
 
 static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
 {
   /* USER CODE BEGIN OnRxDone */
+	Radio.Sleep();
   /* USER CODE END OnRxDone */
 }
 
 static void OnTxTimeout(void)
 {
   /* USER CODE BEGIN OnTxTimeout */
+	Radio.Sleep();
+
+	UTIL_TIMER_Start(&txTimer);
   /* USER CODE END OnTxTimeout */
 }
 
 static void OnRxTimeout(void)
 {
   /* USER CODE BEGIN OnRxTimeout */
+	Radio.Sleep();
   /* USER CODE END OnRxTimeout */
 }
 
 static void OnRxError(void)
 {
   /* USER CODE BEGIN OnRxError */
+	Radio.Sleep();
   /* USER CODE END OnRxError */
 }
 
@@ -272,31 +282,36 @@ void Master_Radio_Send(void) {
 
 	// vibrations
 	if (is_accel) {
-		if (is_door_closed) {
-			if (vibration_active == false) {
-				should_send = true;
-			}
+	    if (vibration_active == false) {
+	        should_send = true;
+	    }
 
-			vibration_active = true;
-			UTIL_TIMER_Start(&vibrationTimer);
-		}
+	    vibration_active = true;
+	    UTIL_TIMER_Start(&vibrationTimer);
 	}
 
-	if (should_send) {
-		if (is_door_closed) {
-			// closed
-			if (vibration_active) {
-				frame.sensor_state = VAL_VIBRATION; // vibration alert
-			} else {
-				frame.sensor_state = VAL_CLOSED;    // safe
-			}
-		} else {
-			// open
-			frame.sensor_state = VAL_OPEN;          // unsafe
-		}
-		frame.msg_counter = global_msg_counter++;
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-		Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
+	if (should_send)
+	{
+
+	    if (is_door_closed)
+	    {
+	        if (vibration_active)
+	        {
+	            frame.sensor_state = VAL_VIBRATION;
+	        }
+	        else
+	        {
+	            frame.sensor_state = VAL_CLOSED;
+	        }
+	    }
+	    else
+	    {
+	        frame.sensor_state = VAL_OPEN;
+	    }
+
+	    frame.msg_counter = global_msg_counter++;
+
+	    Radio.Send((uint8_t*)&frame, sizeof(LoRaNodeData));
 	}
 }
 
