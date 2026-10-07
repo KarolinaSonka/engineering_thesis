@@ -187,7 +187,7 @@ const Dashboard = () => {
             })
             .map(node => {
             
-            const is_offline = node.raw_date ? (time - node.raw_date) > (5 * 60 * 1000) : true;
+            const is_offline = node.raw_date ? (time - node.raw_date) > (16 * 60 * 1000) : true;
             
             const is_closed = node.state === 0;
             const is_open = node.state === 1;
