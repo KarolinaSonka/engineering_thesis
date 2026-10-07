@@ -1,5 +1,7 @@
 #MicroXplorer Configuration settings - do not modify
-ADC.IPParameters=NbrOfConversion,SelectedChannel
+ADC.IPParameters=NbrOfConversion,SelectedChannel,LowPowerAutoWait,LowPowerAutoPowerOff
+ADC.LowPowerAutoPowerOff=ENABLE
+ADC.LowPowerAutoWait=ENABLE
 ADC.NbrOfConversion=1
 ADC.SelectedChannel=ADC_CHANNEL_VREFINT
 CAD.formats=
@@ -99,7 +101,7 @@ PB0-VDD_TCXO.Signal=VDDTCXO
 PB13.GPIOParameters=GPIO_PuPd,GPIO_Label,GPIO_ModeDefaultEXTI
 PB13.GPIO_Label=REED
 PB13.GPIO_ModeDefaultEXTI=GPIO_MODE_IT_RISING_FALLING
-PB13.GPIO_PuPd=GPIO_NOPULL
+PB13.GPIO_PuPd=GPIO_PULLUP
 PB13.Locked=true
 PB13.Signal=GPXTI13
 PB15.Locked=true
