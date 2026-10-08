@@ -44,6 +44,11 @@ extern ADC_HandleTypeDef hadc;
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
 #define TASK_TX 									(1 << CFG_SEQ_Task_TX)
+
+#define TCRT_POWER_GPIO_Port GPIOB
+#define TCRT_POWER_Pin       GPIO_PIN_3
+
+#define STATE_CHANGE_DELAY 1000
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -62,14 +67,14 @@ uint16_t global_msg_counter = 0;
 const uint32_t MY_NODE_ID = 3333;
 
 volatile bool wake_from_accel = false;
-volatile bool wake_from_ir = false;
 volatile bool wake_from_timer = false;
 volatile bool wake_from_vibration_end = false;
 volatile bool is_cooling_down = false;
 volatile bool vibration_active = false;
 
 static uint8_t last_ir_state = 0xFF;
-static uint32_t last_ir_time = 0;
+
+static uint32_t state_change_time = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -206,23 +211,49 @@ static void OnRxError(void)
 }
 
 /* USER CODE BEGIN PrFD */
+static void TCRT5000_On(void)
+{
+    HAL_GPIO_WritePin(TCRT_POWER_GPIO_Port,
+                      TCRT_POWER_Pin,
+                      GPIO_PIN_SET);
+
+    HAL_Delay(10);
+}
+
+
+static void TCRT5000_Off(void)
+{
+    HAL_GPIO_WritePin(TCRT_POWER_GPIO_Port,
+                      TCRT_POWER_Pin,
+                      GPIO_PIN_RESET);
+}
+
 void Master_Radio_Send(void) {
 	LoRaNodeData frame = { 0 };
 	bool should_send = false;
 
 	bool is_accel = wake_from_accel;
-	bool is_ir = wake_from_ir;
 	bool is_timer = wake_from_timer;
 	bool is_vib_end = wake_from_vibration_end;
 
 	wake_from_accel = false;
-	wake_from_ir = false;
 	wake_from_timer = false;
 	wake_from_vibration_end = false;
 
 	frame.node_id = MY_NODE_ID;
 	frame.node_type = 3; // ir switch
+
+	ADC_ChannelConfTypeDef sConfig = { 0 };
+
+	sConfig.Channel = ADC_CHANNEL_VREFINT;
+	sConfig.Rank = ADC_REGULAR_RANK_1;
+	sConfig.SamplingTime = ADC_SAMPLETIME_160CYCLES_5;
+
+	HAL_ADC_ConfigChannel(&hadc, &sConfig);
+	HAL_Delay(1);
+
 	HAL_ADC_Start(&hadc);
+
 	if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK) {
 		uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
 		uint32_t battery_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
@@ -243,7 +274,12 @@ void Master_Radio_Send(void) {
 
 	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
 
-	uint8_t current_ir = HAL_GPIO_ReadPin(IR_GPIO_Port, IR_Pin);
+	TCRT5000_On();
+	HAL_Delay(20);
+
+	GPIO_PinState current_ir = HAL_GPIO_ReadPin(IR_GPIO_Port, IR_Pin);
+
+	TCRT5000_Off();
 
 	uint8_t VAL_CLOSED = 0;    // magnet
 	uint8_t VAL_OPEN = 1;      // no magnet
@@ -257,52 +293,52 @@ void Master_Radio_Send(void) {
 		should_send = true;
 	}
 
+	// vibrations
+	if (is_accel)
+	{
+	    if (last_ir_state != 0xFF && current_ir != last_ir_state)
+	    {
+	        should_send = true;
+	        vibration_active = false;
+
+	        state_change_time = HAL_GetTick();
+	    }
+	    else
+	    {
+	        if (HAL_GetTick() - state_change_time >= STATE_CHANGE_DELAY)
+	        {
+	            if (is_door_closed)
+	            {
+	                if (!vibration_active)
+	                {
+	                    should_send = true;
+	                }
+
+	                vibration_active = true;
+	                UTIL_TIMER_Start(&vibrationTimer);
+	            }
+	        }
+	    }
+
+	    last_ir_state = current_ir;
+	}
+
 	// no vibrations after 10 seconds
 	if (is_vib_end) {
 		vibration_active = false;
-		if (is_door_closed) {
-			should_send = true;
-		}
+		should_send = true;
 	}
 
-	// ir switch changed state
-	if (is_ir) {
-		uint32_t now = HAL_GetTick();
-		if (now - last_ir_time > 500) {
-			if (current_ir != last_ir_state) {
-				last_ir_state = current_ir;
-				last_ir_time = now;
-				should_send = true;
-				if (!is_door_closed) {
-					vibration_active = false;
-				}
-			}
-		}
-	}
-
-	// vibrations
-	if (is_accel) {
-	    if (vibration_active == false) {
-	        should_send = true;
-	    }
-
-	    vibration_active = true;
-	    UTIL_TIMER_Start(&vibrationTimer);
-	}
 
 	if (should_send)
 	{
-
-	    if (is_door_closed)
+	    if (vibration_active && is_door_closed)
 	    {
-	        if (vibration_active)
-	        {
-	            frame.sensor_state = VAL_VIBRATION;
-	        }
-	        else
-	        {
-	            frame.sensor_state = VAL_CLOSED;
-	        }
+	        frame.sensor_state = VAL_VIBRATION;
+	    }
+	    else if (is_door_closed)
+	    {
+	        frame.sensor_state = VAL_CLOSED;
 	    }
 	    else
 	    {
@@ -332,9 +368,6 @@ static void TxProcess(void) {
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == ADXL_INT1_Pin) {
 		wake_from_accel = true;
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	} else if (GPIO_Pin == IR_Pin) {
-		wake_from_ir = true;
 		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	}
 }
