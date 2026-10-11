@@ -1,8 +1,10 @@
 #MicroXplorer Configuration settings - do not modify
-ADC.IPParameters=NbrOfConversion,SelectedChannel,LowPowerAutoWait,LowPowerAutoPowerOff
+ADC.IPParameters=NbrOfConversion,SelectedChannel,LowPowerAutoWait,LowPowerAutoPowerOff,SamplingTimeCommon1,SamplingTimeCommon2
 ADC.LowPowerAutoPowerOff=ENABLE
 ADC.LowPowerAutoWait=ENABLE
 ADC.NbrOfConversion=1
+ADC.SamplingTimeCommon1=ADC_SAMPLETIME_79CYCLES_5
+ADC.SamplingTimeCommon2=ADC_SAMPLETIME_79CYCLES_5
 ADC.SelectedChannel=ADC_CHANNEL_VREFINT
 CAD.formats=
 CAD.pinconfig=

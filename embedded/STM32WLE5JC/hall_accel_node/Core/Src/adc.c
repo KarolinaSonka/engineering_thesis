@@ -55,8 +55,8 @@ void MX_ADC_Init(void)
   hadc.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc.Init.DMAContinuousRequests = DISABLE;
   hadc.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_1CYCLE_5;
-  hadc.Init.SamplingTimeCommon2 = ADC_SAMPLETIME_1CYCLE_5;
+  hadc.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_79CYCLES_5;
+  hadc.Init.SamplingTimeCommon2 = ADC_SAMPLETIME_79CYCLES_5;
   hadc.Init.OversamplingMode = DISABLE;
   hadc.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_HIGH;
   if (HAL_ADC_Init(&hadc) != HAL_OK)
@@ -64,7 +64,16 @@ void MX_ADC_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ADC_Init 2 */
+  ADC_ChannelConfTypeDef sConfig = {0};
 
+  sConfig.Channel = ADC_CHANNEL_VREFINT;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLINGTIME_COMMON_1;
+
+  if (HAL_ADC_ConfigChannel(&hadc, &sConfig) != HAL_OK)
+  {
+      Error_Handler();
+  }
   /* USER CODE END ADC_Init 2 */
 
 }

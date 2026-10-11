@@ -220,31 +220,34 @@ void Master_Radio_Send(void) {
 	frame.node_id = MY_NODE_ID;
 	frame.node_type = 1; // reed switch
 
-	ADC_ChannelConfTypeDef sConfig = { 0 };
-	sConfig.Channel = ADC_CHANNEL_VREFINT;
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_160CYCLES_5;
-	HAL_ADC_ConfigChannel(&hadc, &sConfig);
-
-	HAL_Delay(1);
-
 	HAL_ADC_Start(&hadc);
-	if (HAL_ADC_PollForConversion(&hadc, 100) == HAL_OK) {
-		uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
-		uint32_t battery_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
-				ADC_RESOLUTION_12B);
 
-		int32_t bat_percent = ((battery_mV - 2200) * 100) / (3000 - 2200);
+	if (HAL_ADC_PollForConversion(&hadc, 100) == HAL_OK)
+	{
+	    uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
 
-		if (bat_percent > 100)
-			bat_percent = 100;
-		if (bat_percent < 0)
-			bat_percent = 0;
+	    uint32_t supply_mV =
+	        __HAL_ADC_CALC_VREFANALOG_VOLTAGE(
+	            raw_adc,
+	            ADC_RESOLUTION_12B
+	        );
 
-		frame.battery_lvl = (uint8_t) bat_percent;
-	} else {
-		frame.battery_lvl = 0;
+	    int32_t bat_percent =
+	        ((int32_t)supply_mV - 2200) * 100 / 800;
+
+	    if (bat_percent > 100)
+	        bat_percent = 100;
+
+	    if (bat_percent < 0)
+	        bat_percent = 0;
+
+	    frame.battery_lvl = (uint8_t)bat_percent;
 	}
+	else
+	{
+	    frame.battery_lvl = 0;
+	}
+
 	HAL_ADC_Stop(&hadc);
 
 	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);

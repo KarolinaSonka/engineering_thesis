@@ -36,7 +36,7 @@ extern ADC_HandleTypeDef hadc;
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define TX_OUTPUT_POWER                             14        /* dBm */
+#define TX_OUTPUT_POWER                             2        /* dBm */
 #define LORA_BANDWIDTH                              0         /* [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved] */
 #define LORA_SPREADING_FACTOR                       7         /* [SF7..SF12] */
 #define LORA_CODINGRATE                             1         /* [1: 4/5, 2: 4/6, 3: 4/7, 4: 4/8] */
@@ -44,6 +44,10 @@ extern ADC_HandleTypeDef hadc;
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
 #define TASK_TX 									(1 << CFG_SEQ_Task_TX)
+
+#define HALL_POWER_GPIO_Port GPIOB
+#define HALL_POWER_Pin       GPIO_PIN_3
+#define STATE_CHANGE_DELAY   1000
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -69,7 +73,7 @@ volatile bool is_cooling_down = false;
 volatile bool vibration_active = false;
 
 static uint8_t last_hall_state = 0xFF;
-static uint32_t last_hall_time = 0;
+static uint32_t state_change_time = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -145,7 +149,7 @@ void SubghzApp_Init(void)
 
 	UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
 
-	UTIL_TIMER_Create(&txTimer, 180000, UTIL_TIMER_ONESHOT, TxTimerCallback,
+	UTIL_TIMER_Create(&txTimer, 900000, UTIL_TIMER_ONESHOT, TxTimerCallback,
 	NULL); // 3 minutes
 	UTIL_TIMER_Create(&vibrationTimer, 10000, UTIL_TIMER_ONESHOT,
 			VibrationTimerCallback, NULL);
@@ -154,6 +158,8 @@ void SubghzApp_Init(void)
 
 	wake_from_timer = true;
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+
+	Radio.Sleep();
   /* USER CODE END SubghzApp_Init_2 */
 }
 
@@ -165,27 +171,32 @@ void SubghzApp_Init(void)
 static void OnTxDone(void)
 {
   /* USER CODE BEGIN OnTxDone */
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
-
 	UTIL_TIMER_Start(&txTimer);
+
+	Radio.Sleep();
   /* USER CODE END OnTxDone */
 }
 
 static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
 {
   /* USER CODE BEGIN OnRxDone */
+	Radio.Sleep();
   /* USER CODE END OnRxDone */
 }
 
 static void OnTxTimeout(void)
 {
   /* USER CODE BEGIN OnTxTimeout */
+	Radio.Sleep();
+
+	UTIL_TIMER_Start(&txTimer);
   /* USER CODE END OnTxTimeout */
 }
 
 static void OnRxTimeout(void)
 {
   /* USER CODE BEGIN OnRxTimeout */
+	Radio.Sleep();
   /* USER CODE END OnRxTimeout */
 }
 
@@ -196,44 +207,101 @@ static void OnRxError(void)
 }
 
 /* USER CODE BEGIN PrFD */
+static void HallSensor_On(void)
+{
+    HAL_GPIO_WritePin(
+        HALL_POWER_GPIO_Port,
+        HALL_POWER_Pin,
+        GPIO_PIN_SET
+    );
+
+    HAL_Delay(20);
+}
+
+static void HallSensor_Off(void)
+{
+    HAL_GPIO_WritePin(
+        HALL_POWER_GPIO_Port,
+        HALL_POWER_Pin,
+        GPIO_PIN_RESET
+    );
+}
+
+
+static GPIO_PinState HallSensor_ReadStable(void)
+{
+    uint8_t low_count = 0;
+    uint8_t high_count = 0;
+
+    HallSensor_On();
+    HAL_Delay(50);
+
+    for (uint8_t i = 0; i < 5; i++)
+    {
+        if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_9) == GPIO_PIN_RESET)
+            low_count++;
+        else
+            high_count++;
+
+        HAL_Delay(5);
+    }
+
+    HallSensor_Off();
+
+    return (low_count > high_count)
+           ? GPIO_PIN_RESET
+           : GPIO_PIN_SET;
+}
+
+
 void Master_Radio_Send(void) {
 	LoRaNodeData frame = { 0 };
 	bool should_send = false;
 
 	bool is_accel = wake_from_accel;
-	bool is_hall = wake_from_hall;
 	bool is_timer = wake_from_timer;
 	bool is_vib_end = wake_from_vibration_end;
 
 	wake_from_accel = false;
-	wake_from_hall = false;
 	wake_from_timer = false;
 	wake_from_vibration_end = false;
 
 	frame.node_id = MY_NODE_ID;
 	frame.node_type = 2; // hall switch + accel
+
 	HAL_ADC_Start(&hadc);
-	if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK) {
-		uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
-		uint32_t battery_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
-				ADC_RESOLUTION_12B);
 
-		int32_t bat_percent = ((battery_mV - 2100) * 100) / (3000 - 2100);
+		if (HAL_ADC_PollForConversion(&hadc, 100) == HAL_OK)
+		{
+		    uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
 
-		if (bat_percent > 100)
-			bat_percent = 100;
-		if (bat_percent < 0)
-			bat_percent = 0;
+		    uint32_t supply_mV =
+		        __HAL_ADC_CALC_VREFANALOG_VOLTAGE(
+		            raw_adc,
+		            ADC_RESOLUTION_12B
+		        );
 
-		frame.battery_lvl = (uint8_t) bat_percent;
-	} else {
-		frame.battery_lvl = 0;
-	}
-	HAL_ADC_Stop(&hadc);
+		    int32_t bat_percent =
+		        ((int32_t)supply_mV - 2200) * 100 / 800;
+
+		    if (bat_percent > 100)
+		        bat_percent = 100;
+
+		    if (bat_percent < 0)
+		        bat_percent = 0;
+
+		    frame.battery_lvl = (uint8_t)bat_percent;
+		}
+		else
+		{
+		    frame.battery_lvl = 0;
+		}
+
+		HAL_ADC_Stop(&hadc);
 
 	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
 
-	uint8_t current_hall = HAL_GPIO_ReadPin(HALL_GPIO_Port, HALL_Pin);
+	GPIO_PinState current_hall = HallSensor_ReadStable();
 
 	uint8_t VAL_CLOSED = 0;    // magnet
 	uint8_t VAL_OPEN = 1;      // no magnet
@@ -247,57 +315,51 @@ void Master_Radio_Send(void) {
 		should_send = true;
 	}
 
-	// no vibrations after 10 seconds
-	if (is_vib_end) {
-		vibration_active = false;
-		if (is_door_closed) {
-			should_send = true;
-		}
-	}
-
-	// hall switch changed state
-	if (is_hall) {
-		uint32_t now = HAL_GetTick();
-		if (now - last_hall_time > 500) {
-			if (current_hall != last_hall_state) {
-				last_hall_state = current_hall;
-				last_hall_time = now;
-				should_send = true;
-				if (!is_door_closed) {
-					vibration_active = false;
-				}
-			}
-		}
-	}
-
 	// vibrations
 	if (is_accel) {
-		if (is_door_closed) {
-			if (vibration_active == false) {
-				should_send = true;
-			}
+	        if (last_hall_state != 0xFF &&
+	            current_hall != last_hall_state) {
+	            should_send = true;
+	            vibration_active = false;
+	            state_change_time = HAL_GetTick();
+	        } else {
+	            if (HAL_GetTick() - state_change_time >= STATE_CHANGE_DELAY) {
+	                if (is_door_closed) {
+	                    if (!vibration_active) {
+	                        should_send = true;
+	                    }
 
-			vibration_active = true;
-			UTIL_TIMER_Start(&vibrationTimer);
-		}
-	}
+	                    vibration_active = true;
+	                    UTIL_TIMER_Start(&vibrationTimer);
+	                }
+	            }
+	        }
 
-	if (should_send) {
-		if (is_door_closed) {
-			// closed
-			if (vibration_active) {
-				frame.sensor_state = VAL_VIBRATION; // vibration alert
-			} else {
-				frame.sensor_state = VAL_CLOSED;    // safe
-			}
-		} else {
-			// open
-			frame.sensor_state = VAL_OPEN;          // unsafe
-		}
-		frame.msg_counter = global_msg_counter++;
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-		Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
-	}
+	        last_hall_state = current_hall;
+	    }
+
+	// no vibrations after 10 seconds
+	if (is_vib_end) {
+	        vibration_active = false;
+	        should_send = true;
+	    }
+
+	 if (should_send) {
+	        if (vibration_active && is_door_closed) {
+	            frame.sensor_state = VAL_VIBRATION;
+	        } else if (is_door_closed) {
+	            frame.sensor_state = VAL_CLOSED;
+	        } else {
+	            frame.sensor_state = VAL_OPEN;
+	        }
+
+	        frame.msg_counter = global_msg_counter++;
+
+	        Radio.Send(
+	            (uint8_t *)&frame,
+	            sizeof(LoRaNodeData)
+	        );
+	    }
 }
 
 static void VibrationTimerCallback(void *context) {
@@ -317,9 +379,6 @@ static void TxProcess(void) {
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == ADXL_INT1_Pin) {
 		wake_from_accel = true;
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	} else if (GPIO_Pin == HALL_Pin) {
-		wake_from_hall = true;
 		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	}
 }

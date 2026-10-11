@@ -37,7 +37,7 @@ extern ADC_HandleTypeDef hadc;
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define TX_OUTPUT_POWER                             14        /* dBm */
+#define TX_OUTPUT_POWER                             2        /* dBm */
 #define LORA_BANDWIDTH                              0         /* [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved] */
 #define LORA_SPREADING_FACTOR                       7         /* [SF7..SF12] */
 #define LORA_CODINGRATE                             1         /* [1: 4/5, 2: 4/6, 3: 4/7, 4: 4/8] */
@@ -77,27 +77,28 @@ static int16_t last_x = 0, last_y = 0, last_z = 0;
 static void OnTxDone(void);
 
 /**
-  * @brief Function to be executed on Radio Rx Done event
-  * @param  payload ptr of buffer received
-  * @param  size buffer size
-  * @param  rssi
-  * @param  LoraSnr_FskCfo
-  */
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
+ * @brief Function to be executed on Radio Rx Done event
+ * @param  payload ptr of buffer received
+ * @param  size buffer size
+ * @param  rssi
+ * @param  LoraSnr_FskCfo
+ */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
+		int8_t LoraSnr_FskCfo);
 
 /**
-  * @brief Function executed on Radio Tx Timeout event
-  */
+ * @brief Function executed on Radio Tx Timeout event
+ */
 static void OnTxTimeout(void);
 
 /**
-  * @brief Function executed on Radio Rx Timeout event
-  */
+ * @brief Function executed on Radio Rx Timeout event
+ */
 static void OnRxTimeout(void);
 
 /**
-  * @brief Function executed on Radio Rx Error event
-  */
+ * @brief Function executed on Radio Rx Error event
+ */
 static void OnRxError(void);
 
 /* USER CODE BEGIN PFP */
@@ -108,22 +109,21 @@ extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
-void SubghzApp_Init(void)
-{
-  /* USER CODE BEGIN SubghzApp_Init_1 */
+void SubghzApp_Init(void) {
+	/* USER CODE BEGIN SubghzApp_Init_1 */
 
-  /* USER CODE END SubghzApp_Init_1 */
+	/* USER CODE END SubghzApp_Init_1 */
 
-  /* Radio initialization */
-  RadioEvents.TxDone = OnTxDone;
-  RadioEvents.RxDone = OnRxDone;
-  RadioEvents.TxTimeout = OnTxTimeout;
-  RadioEvents.RxTimeout = OnRxTimeout;
-  RadioEvents.RxError = OnRxError;
+	/* Radio initialization */
+	RadioEvents.TxDone = OnTxDone;
+	RadioEvents.RxDone = OnRxDone;
+	RadioEvents.TxTimeout = OnTxTimeout;
+	RadioEvents.RxTimeout = OnRxTimeout;
+	RadioEvents.RxError = OnRxError;
 
-  Radio.Init(&RadioEvents);
+	Radio.Init(&RadioEvents);
 
-  /* USER CODE BEGIN SubghzApp_Init_2 */
+	/* USER CODE BEGIN SubghzApp_Init_2 */
 
 	Radio.SetChannel(RF_FREQUENCY);
 	Radio.SetTxConfig(MODEM_LORA,
@@ -143,7 +143,7 @@ void SubghzApp_Init(void)
 
 	UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
 
-	UTIL_TIMER_Create(&txTimer, 180000, UTIL_TIMER_ONESHOT, TxTimerCallback,
+	UTIL_TIMER_Create(&txTimer, 900000, UTIL_TIMER_ONESHOT, TxTimerCallback,
 	NULL);
 	UTIL_TIMER_Create(&cooldownTimer, 10000, UTIL_TIMER_ONESHOT,
 			CooldownTimerCallback, NULL);
@@ -151,7 +151,9 @@ void SubghzApp_Init(void)
 
 	wake_from_timer = true;
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-  /* USER CODE END SubghzApp_Init_2 */
+
+	Radio.Sleep();
+	/* USER CODE END SubghzApp_Init_2 */
 }
 
 /* USER CODE BEGIN EF */
@@ -159,37 +161,37 @@ void SubghzApp_Init(void)
 /* USER CODE END EF */
 
 /* Private functions ---------------------------------------------------------*/
-static void OnTxDone(void)
-{
-  /* USER CODE BEGIN OnTxDone */
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
-
+static void OnTxDone(void) {
+	/* USER CODE BEGIN OnTxDone */
 	UTIL_TIMER_Start(&txTimer);
-  /* USER CODE END OnTxDone */
+	Radio.Sleep();
+	/* USER CODE END OnTxDone */
 }
 
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
-{
-  /* USER CODE BEGIN OnRxDone */
-  /* USER CODE END OnRxDone */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
+		int8_t LoraSnr_FskCfo) {
+	/* USER CODE BEGIN OnRxDone */
+	Radio.Sleep();
+	/* USER CODE END OnRxDone */
 }
 
-static void OnTxTimeout(void)
-{
-  /* USER CODE BEGIN OnTxTimeout */
-  /* USER CODE END OnTxTimeout */
+static void OnTxTimeout(void) {
+	/* USER CODE BEGIN OnTxTimeout */
+	Radio.Sleep();
+	UTIL_TIMER_Start(&txTimer);
+	/* USER CODE END OnTxTimeout */
 }
 
-static void OnRxTimeout(void)
-{
-  /* USER CODE BEGIN OnRxTimeout */
-  /* USER CODE END OnRxTimeout */
+static void OnRxTimeout(void) {
+	/* USER CODE BEGIN OnRxTimeout */
+	Radio.Sleep();
+	/* USER CODE END OnRxTimeout */
 }
 
-static void OnRxError(void)
-{
-  /* USER CODE BEGIN OnRxError */
-  /* USER CODE END OnRxError */
+static void OnRxError(void) {
+	/* USER CODE BEGIN OnRxError */
+	Radio.Sleep();
+	/* USER CODE END OnRxError */
 }
 
 /* USER CODE BEGIN PrFD */
@@ -208,15 +210,18 @@ void Master_Radio_Send(void) {
 	frame.node_id = MY_NODE_ID;
 	frame.node_type = 0; // accel only
 	HAL_ADC_Start(&hadc);
-	if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK) {
+
+	if (HAL_ADC_PollForConversion(&hadc, 100) == HAL_OK) {
 		uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
-		uint32_t battery_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
+
+		uint32_t supply_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
 				ADC_RESOLUTION_12B);
 
-		int32_t bat_percent = ((battery_mV - 2100) * 100) / (3000 - 2100);
+		int32_t bat_percent = ((int32_t) supply_mV - 2200) * 100 / 800;
 
 		if (bat_percent > 100)
 			bat_percent = 100;
+
 		if (bat_percent < 0)
 			bat_percent = 0;
 
@@ -224,6 +229,7 @@ void Master_Radio_Send(void) {
 	} else {
 		frame.battery_lvl = 0;
 	}
+
 	HAL_ADC_Stop(&hadc);
 
 	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
