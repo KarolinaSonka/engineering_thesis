@@ -10,7 +10,8 @@ import {
   Shield, 
   ShieldAlert,
   Cpu,
-  Trash2
+  Trash2,
+  Wifi
 } from 'lucide-react';
 
 const Settings = () => {
@@ -135,6 +136,24 @@ const Settings = () => {
     }
   };
 
+  const openGatewaySetup = () => {
+  const confirmed = window.confirm(
+    'Aby skonfigurować Wi-Fi bramki Loriota:\n\n' +
+    '1. Połącz telefon lub komputer z siecią Loriota-Setup.\n' +
+    '2. Jeśli urządzenie zgłasza brak Internetu, pozostań w tej sieci.\n' +
+    '3. Otwórz lokalny portal konfiguracji.\n\n' +
+    'Czy otworzyć stronę konfiguracji?'
+  );
+
+  if (confirmed) {
+    window.open(
+      'http://192.168.4.1/',
+      '_blank',
+      'noopener,noreferrer'
+    );
+  }
+};
+
   return (
     <div className="p-4 md:p-8 animate-in fade-in duration-500 w-full max-w-3xl mx-auto mb-20 font-custom text-slate-200">
       
@@ -147,6 +166,50 @@ const Settings = () => {
           <p className="text-white/40 font-light text-sm mt-1">Konfiguracja węzłów IoT i powiadomień</p>
         </div>
       </header>
+
+      <section className="mb-12">
+  <h2 className="text-lg font-medium text-white mb-6 flex items-center gap-2">
+    <Wifi size={20} className="text-[#64C9CF]" />
+    Bramka Loriota
+  </h2>
+
+  <div className="bg-white/5 border border-white/10 rounded-2xl p-5 backdrop-blur-md">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex items-start gap-3">
+        <div className="w-11 h-11 shrink-0 rounded-xl bg-[#64C9CF]/10 flex items-center justify-center">
+          <Wifi size={22} className="text-[#64C9CF]" />
+        </div>
+
+        <div>
+          <h3 className="text-white font-medium">
+            Konfiguracja Wi-Fi
+          </h3>
+
+          <p className="text-sm text-white/50 mt-1">
+            Połącz bramkę z domową siecią bez zmiany
+            ustawień w kodzie urządzenia.
+          </p>
+
+          <p className="text-xs text-white/35 mt-2">
+            Sieć konfiguracyjna: Loriota-Setup
+          </p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={openGatewaySetup}
+        className="shrink-0 flex items-center justify-center gap-2
+          bg-[#64C9CF]/15 hover:bg-[#64C9CF]/25
+          text-[#64C9CF] border border-[#64C9CF]/20
+          rounded-xl px-4 py-3 text-sm transition-colors"
+      >
+        <Wifi size={16} />
+        Konfiguruj Wi-Fi
+      </button>
+    </div>
+  </div>
+</section>
 
       <section className="mb-12">
         <h2 className="text-lg font-medium text-white mb-6 flex items-center gap-2">
