@@ -147,9 +147,6 @@ int main(void) {
 		MX_SubGHz_Phy_Process();
 
 		/* USER CODE BEGIN 3 */
-		HAL_PWR_EnterSLEEPMode(
-		PWR_MAINREGULATOR_ON,
-		PWR_SLEEPENTRY_WFI);
 	}
 	/* USER CODE END 3 */
 }
