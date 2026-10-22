@@ -31,17 +31,29 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-
+typedef enum
+{
+    LORIOTA_WAKE_BOOT = 0,
+    LORIOTA_WAKE_PERIODIC,
+    LORIOTA_WAKE_ACCEL,
+    LORIOTA_WAKE_COOLDOWN_END,
+	LORIOTA_WAKE_UNEXPECTED
+} LoriotaWakeReason_t;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
+extern LoriotaWakeReason_t loriota_wake_reason;
+extern bool loriota_was_standby;
 
+#define LORIOTA_BKP_MAGIC_VALUE  0x4C4F5249UL
+#define LORIOTA_STAGE_PERIODIC   1UL
+#define LORIOTA_STAGE_COOLDOWN   2UL
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/
@@ -61,7 +73,6 @@ void Error_Handler(void);
 #define LED_GPIO_Port GPIOB
 #define ADXL_INT1_Pin GPIO_PIN_0
 #define ADXL_INT1_GPIO_Port GPIOA
-#define ADXL_INT1_EXTI_IRQn EXTI0_IRQn
 #define RF_CTRL1_Pin GPIO_PIN_4
 #define RF_CTRL1_GPIO_Port GPIOA
 #define RF_CTRL2_Pin GPIO_PIN_5

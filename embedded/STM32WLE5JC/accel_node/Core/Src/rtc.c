@@ -21,7 +21,7 @@
 #include "rtc.h"
 
 /* USER CODE BEGIN 0 */
-
+#include "main.h"
 /* USER CODE END 0 */
 
 RTC_HandleTypeDef hrtc;
@@ -30,7 +30,16 @@ RTC_HandleTypeDef hrtc;
 void MX_RTC_Init(void) {
 
 	/* USER CODE BEGIN RTC_Init 0 */
+	if (loriota_was_standby) {
+		hrtc.Instance = RTC;
 
+		HAL_RTC_MspInit(&hrtc);
+
+		hrtc.Init.AsynchPrediv = 31;
+		hrtc.Init.BinMode = RTC_BINARY_ONLY;
+
+		return;
+	}
 	/* USER CODE END RTC_Init 0 */
 
 	RTC_AlarmTypeDef sAlarm = { 0 };
