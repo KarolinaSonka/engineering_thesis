@@ -24,9 +24,7 @@
 #include "stm32_lpm_if.h"
 
 /* USER CODE BEGIN Includes */
-#include "main.h"
-#include "i2c.h"
-#include "adc.h"
+
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -111,9 +109,7 @@ void PWR_EnterStopMode(void)
 void PWR_ExitStopMode(void)
 {
   /* USER CODE BEGIN ExitStopMode_1 */
-	  SystemClock_Config();
-	  MX_I2C2_Init();
-	  MX_ADC_Init();
+
   /* USER CODE END ExitStopMode_1 */
   /* Resume sysTick : work around for debugger problem in dual core */
   HAL_ResumeTick();
