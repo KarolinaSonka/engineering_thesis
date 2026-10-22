@@ -30,7 +30,7 @@ RTC_HandleTypeDef hrtc;
 void MX_RTC_Init(void) {
 
 	/* USER CODE BEGIN RTC_Init 0 */
-	if (loriota_was_standby) {
+	if (loriota_was_shutdown) {
 		hrtc.Instance = RTC;
 
 		HAL_RTC_MspInit(&hrtc);
@@ -93,7 +93,7 @@ void HAL_RTC_MspInit(RTC_HandleTypeDef *rtcHandle) {
 		/** Initializes the peripherals clocks
 		 */
 		PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_RTC;
-		PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
+		PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
 
 		if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK) {
 			Error_Handler();
@@ -104,7 +104,18 @@ void HAL_RTC_MspInit(RTC_HandleTypeDef *rtcHandle) {
 		__HAL_RCC_RTCAPB_CLK_ENABLE();
 		/* USER CODE BEGIN RTC_MspInit 1 */
 		HAL_NVIC_SetPriority(RTC_Alarm_IRQn, 0, 0);
-		HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
+
+		if (loriota_was_shutdown) {
+			__HAL_RTC_WRITEPROTECTION_DISABLE(rtcHandle);
+
+			CLEAR_BIT(RTC->CR, RTC_CR_ALRAE | RTC_CR_ALRAIE);
+
+			WRITE_REG(RTC->SCR, RTC_SCR_CALRAF);
+
+			__HAL_RTC_WRITEPROTECTION_ENABLE(rtcHandle);
+
+			HAL_NVIC_ClearPendingIRQ(RTC_Alarm_IRQn);
+		}
 		/* USER CODE END RTC_MspInit 1 */
 	}
 }

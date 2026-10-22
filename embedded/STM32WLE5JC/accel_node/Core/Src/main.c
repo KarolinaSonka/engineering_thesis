@@ -50,9 +50,8 @@
 /* USER CODE BEGIN PV */
 LoriotaWakeReason_t loriota_wake_reason = LORIOTA_WAKE_BOOT;
 
-bool loriota_was_standby = false;
+bool loriota_was_shutdown = false;
 
-static bool loriota_woke_from_accel = false;
 static bool loriota_woke_from_rtc = false;
 /* USER CODE END PV */
 
@@ -84,13 +83,9 @@ int main(void) {
 
 	/* USER CODE BEGIN Init */
 
-	loriota_was_standby = (__HAL_PWR_GET_FLAG(PWR_FLAG_SB) != RESET);
-	loriota_woke_from_accel = (__HAL_PWR_GET_FLAG(PWR_FLAG_WUF1) != RESET);
-
 	HAL_PWR_DisableWakeUpPin(PWR_WAKEUP_PIN1);
 
 	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
-	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
 	/* USER CODE END Init */
 
 	/* Configure the system clock */
@@ -101,27 +96,30 @@ int main(void) {
 	hrtc.Instance = RTC;
 	__HAL_RCC_RTCAPB_CLK_ENABLE();
 
-	if (!loriota_was_standby) {
+	uint32_t shutdown_marker = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR16);
+
+	loriota_was_shutdown = (shutdown_marker == LORIOTA_SHUTDOWN_ARMED);
+
+	if (!loriota_was_shutdown) {
 		loriota_wake_reason = LORIOTA_WAKE_BOOT;
 	} else {
-		uint32_t saved_stage = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR18);
-
 		uint32_t magic = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR17);
+
+		uint32_t saved_stage = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR18);
 
 		loriota_woke_from_rtc = (__HAL_RTC_WAKEUPTIMER_GET_FLAG(
 				&hrtc, RTC_FLAG_WUTF) != RESET);
 
 		if (magic != LORIOTA_BKP_MAGIC_VALUE) {
 			loriota_wake_reason = LORIOTA_WAKE_UNEXPECTED;
-		} else if (loriota_woke_from_accel
-				&& saved_stage == LORIOTA_STAGE_PERIODIC) {
-			loriota_wake_reason = LORIOTA_WAKE_ACCEL;
-		} else if (loriota_woke_from_rtc
-				&& saved_stage == LORIOTA_STAGE_COOLDOWN) {
-			loriota_wake_reason = LORIOTA_WAKE_COOLDOWN_END;
-		} else if (loriota_woke_from_rtc
-				&& saved_stage == LORIOTA_STAGE_PERIODIC) {
-			loriota_wake_reason = LORIOTA_WAKE_PERIODIC;
+		} else if (saved_stage == LORIOTA_STAGE_COOLDOWN) {
+			loriota_wake_reason =
+					loriota_woke_from_rtc ?
+							LORIOTA_WAKE_COOLDOWN_END : LORIOTA_WAKE_UNEXPECTED;
+		} else if (saved_stage == LORIOTA_STAGE_PERIODIC) {
+			loriota_wake_reason =
+					loriota_woke_from_rtc ?
+							LORIOTA_WAKE_PERIODIC : LORIOTA_WAKE_ACCEL;
 		} else {
 			loriota_wake_reason = LORIOTA_WAKE_UNEXPECTED;
 		}
@@ -135,6 +133,10 @@ int main(void) {
 	MX_I2C2_Init();
 	MX_ADC_Init();
 	/* USER CODE BEGIN 2 */
+	HAL_PWR_EnableBkUpAccess();
+
+	HAL_RTCEx_BKUPWrite(&hrtc,
+	RTC_BKP_DR16, 0UL);
 
 	if (HAL_RTCEx_DeactivateWakeUpTimer(&hrtc) != HAL_OK) {
 		Error_Handler();
@@ -152,6 +154,16 @@ int main(void) {
 	HAL_I2C_DeInit(&hi2c2);
 	MX_I2C2_Init();
 	HAL_Delay(10);
+
+	if (loriota_wake_reason == LORIOTA_WAKE_ACCEL) {
+		uint8_t int_source = 0;
+
+		if (HAL_I2C_Mem_Read(&hi2c2, 0xA6, 0x30,
+		I2C_MEMADD_SIZE_8BIT, &int_source, 1, 100) != HAL_OK
+				|| (int_source & 0x10U) == 0U) {
+			loriota_wake_reason = LORIOTA_WAKE_UNEXPECTED;
+		}
+	}
 
 	uint8_t val;
 
@@ -214,19 +226,23 @@ void SystemClock_Config(void) {
 	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
 	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
 
+	/** Configure LSE Drive Capability
+	 */
+	HAL_PWR_EnableBkUpAccess();
+	__HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
+
 	/** Configure the main internal regulator output voltage
 	 */
 	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
 	/** Initializes the CPU, AHB and APB buses clocks
 	 */
-	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSE
 			| RCC_OSCILLATORTYPE_MSI;
+	RCC_OscInitStruct.LSEState = RCC_LSE_ON;
 	RCC_OscInitStruct.MSIState = RCC_MSI_ON;
 	RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
 	RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-	RCC_OscInitStruct.LSIDiv = RCC_LSI_DIV1;
-	RCC_OscInitStruct.LSIState = RCC_LSI_ON;
 	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
 	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
 	RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV1;

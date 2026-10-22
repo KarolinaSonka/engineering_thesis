@@ -228,7 +228,7 @@ static void Loriota_SetRTCWakeup(uint32_t seconds, uint32_t next_stage) {
 	uint32_t divider = (hrtc.Init.AsynchPrediv + 1UL) * (1UL << (8UL + bcdu));
 
 	uint32_t ticks =
-			(uint32_t) (((uint64_t) seconds * LSI_VALUE + divider / 2UL)
+			(uint32_t) (((uint64_t) seconds * LSE_VALUE + divider / 2UL)
 					/ divider);
 
 	if (ticks == 0UL) {
@@ -245,12 +245,13 @@ static void Loriota_SetRTCWakeup(uint32_t seconds, uint32_t next_stage) {
 	}
 }
 
-void Loriota_EnterStandby(uint32_t seconds, uint32_t next_stage) {
+void Loriota_EnterShutdown(uint32_t seconds, uint32_t next_stage) {
 	if (next_stage == LORIOTA_STAGE_PERIODIC) {
 		for (uint8_t attempt = 0; attempt < 20; attempt++) {
 			ADXL345_ClearInterrupt();
 
-			if (HAL_GPIO_ReadPin(ADXL_INT1_GPIO_Port,
+			if (HAL_GPIO_ReadPin(
+			ADXL_INT1_GPIO_Port,
 			ADXL_INT1_Pin) == GPIO_PIN_RESET) {
 				break;
 			}
@@ -284,13 +285,20 @@ void Loriota_EnterStandby(uint32_t seconds, uint32_t next_stage) {
 	if (next_stage == LORIOTA_STAGE_PERIODIC) {
 		ADXL345_ClearInterrupt();
 
-		if (HAL_GPIO_ReadPin(ADXL_INT1_GPIO_Port,
+		if (HAL_GPIO_ReadPin(
+		ADXL_INT1_GPIO_Port,
 		ADXL_INT1_Pin) == GPIO_PIN_RESET) {
 			HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1_HIGH);
 		}
 	}
 
 	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+
+	HAL_PWR_EnableBkUpAccess();
+
+	HAL_RTCEx_BKUPWrite(&hrtc,
+	RTC_BKP_DR16,
+	LORIOTA_SHUTDOWN_ARMED);
 
 	HAL_NVIC_DisableIRQ(TIM17_IRQn);
 	HAL_NVIC_ClearPendingIRQ(TIM17_IRQn);
@@ -300,7 +308,7 @@ void Loriota_EnterStandby(uint32_t seconds, uint32_t next_stage) {
 	__DSB();
 	__ISB();
 
-	HAL_PWR_EnterSTANDBYMode();
+	HAL_PWREx_EnterSHUTDOWNMode();
 
 	Error_Handler();
 }
@@ -370,7 +378,7 @@ static void TxProcess(void) {
 	if (tx_finished) {
 		tx_finished = false;
 
-		Loriota_EnterStandby(next_sleep_seconds, next_sleep_stage);
+		Loriota_EnterShutdown(next_sleep_seconds, next_sleep_stage);
 	} else {
 		Master_Radio_Send();
 	}

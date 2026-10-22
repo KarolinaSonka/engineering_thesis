@@ -210,7 +210,8 @@ UTIL_TIMER_Status_t TIMER_IF_Init(void)
   }
 
   /* USER CODE BEGIN TIMER_IF_Init_Last */
-
+  HAL_NVIC_ClearPendingIRQ(RTC_Alarm_IRQn);
+  HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
   /* USER CODE END TIMER_IF_Init_Last */
   return ret;
 }
