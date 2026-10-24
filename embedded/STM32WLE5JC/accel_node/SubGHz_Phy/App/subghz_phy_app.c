@@ -170,15 +170,15 @@ void SubghzApp_Init(void) {
 static void OnTxDone(void) {
 	/* USER CODE BEGIN OnTxDone */
 
-    Radio.Sleep();
+	Radio.Sleep();
 
-    // Restart periodic report timer after transmission
-    UTIL_TIMER_Stop(&txTimer);
-    UTIL_TIMER_Start(&txTimer);
+	// Restart periodic report timer after transmission
+	UTIL_TIMER_Stop(&txTimer);
+	UTIL_TIMER_Start(&txTimer);
 
-    // Request LPRun entry from the sequencer, not the IRQ
-    enter_lprun_requested = true;
-    UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+	// Request LPRun entry from the sequencer, not the IRQ
+	enter_lprun_requested = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 
 	/* USER CODE END OnTxDone */
 }
@@ -192,13 +192,13 @@ static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 
 static void OnTxTimeout(void) {
 	/* USER CODE BEGIN OnTxTimeout */
-	 Radio.Sleep();
+	Radio.Sleep();
 
-	    UTIL_TIMER_Stop(&txTimer);
-	    UTIL_TIMER_Start(&txTimer);
+	UTIL_TIMER_Stop(&txTimer);
+	UTIL_TIMER_Start(&txTimer);
 
-	    enter_lprun_requested = true;
-	    UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+	enter_lprun_requested = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	/* USER CODE END OnTxTimeout */
 }
 
@@ -284,15 +284,14 @@ void Master_Radio_Send(void) {
 		}
 	}
 
-	if (should_send)
-	{
-	    frame.msg_counter = global_msg_counter++;
+	if (should_send) {
+		frame.msg_counter = global_msg_counter++;
 
-	    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
 
-	    radio_tx_started = true;
+		radio_tx_started = true;
 
-	    Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
+		Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 	}
 }
 
@@ -307,33 +306,27 @@ static void TxTimerCallback(void *context) {
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 }
 
-static void TxProcess(void)
-{
-    bool has_event =
-        wake_from_exti ||
-        wake_from_timer ||
-        wake_from_cooldown;
+static void TxProcess(void) {
+	bool has_event = wake_from_exti || wake_from_timer || wake_from_cooldown;
 
-    if (enter_lprun_requested && !has_event)
-    {
-        enter_lprun_requested = false;
+	if (enter_lprun_requested && !has_event) {
+		enter_lprun_requested = false;
 
-        Loriota_EnterLowPowerRun();
-        return;
-    }
+		Loriota_EnterLowPowerRun();
+		return;
+	}
 
-    enter_lprun_requested = false;
+	enter_lprun_requested = false;
 
-    Loriota_ExitLowPowerRun();
+	Loriota_ExitLowPowerRun();
 
-    radio_tx_started = false;
+	radio_tx_started = false;
 
-    Master_Radio_Send();
+	Master_Radio_Send();
 
-    if (!radio_tx_started)
-    {
-        Loriota_EnterLowPowerRun();
-    }
+	if (!radio_tx_started) {
+		Loriota_EnterLowPowerRun();
+	}
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {

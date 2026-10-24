@@ -144,10 +144,7 @@ int main(void) {
 
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
 
-	UTIL_LPM_SetStopMode(
-	    (1UL << CFG_LPM_APP_Id),
-	    UTIL_LPM_DISABLE
-	);
+	UTIL_LPM_SetStopMode((1UL << CFG_LPM_APP_Id), UTIL_LPM_DISABLE);
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
@@ -215,75 +212,65 @@ void SystemClock_Config(void) {
 }
 
 /* USER CODE BEGIN 4 */
-void Loriota_EnterLowPowerRun(void)
-{
-    if (loriota_lprun_active)
-    {
-        return;
-    }
+void Loriota_EnterLowPowerRun(void) {
+	if (loriota_lprun_active) {
+		return;
+	}
 
-    RCC_ClkInitTypeDef clk = {0};
-    RCC_OscInitTypeDef osc = {0};
+	RCC_ClkInitTypeDef clk = { 0 };
+	RCC_OscInitTypeDef osc = { 0 };
 
-    clk.ClockType = RCC_CLOCKTYPE_SYSCLK |
-                    RCC_CLOCKTYPE_HCLK |
-                    RCC_CLOCKTYPE_HCLK3 |
-                    RCC_CLOCKTYPE_PCLK1 |
-                    RCC_CLOCKTYPE_PCLK2;
+	clk.ClockType = RCC_CLOCKTYPE_SYSCLK |
+	RCC_CLOCKTYPE_HCLK |
+	RCC_CLOCKTYPE_HCLK3 |
+	RCC_CLOCKTYPE_PCLK1 |
+	RCC_CLOCKTYPE_PCLK2;
 
-    clk.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
-    clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
-    clk.AHBCLK3Divider = RCC_SYSCLK_DIV1;
-    clk.APB1CLKDivider = RCC_HCLK_DIV1;
-    clk.APB2CLKDivider = RCC_HCLK_DIV1;
+	clk.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+	clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+	clk.AHBCLK3Divider = RCC_SYSCLK_DIV1;
+	clk.APB1CLKDivider = RCC_HCLK_DIV1;
+	clk.APB2CLKDivider = RCC_HCLK_DIV1;
 
-    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK)
-    {
-        Error_Handler();
-    }
+	if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) {
+		Error_Handler();
+	}
 
-    osc.OscillatorType = RCC_OSCILLATORTYPE_MSI;
-    osc.MSIState = RCC_MSI_ON;
-    osc.MSIClockRange = RCC_MSIRANGE_4;
-    osc.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
-    osc.PLL.PLLState = RCC_PLL_OFF;
+	osc.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+	osc.MSIState = RCC_MSI_ON;
+	osc.MSIClockRange = RCC_MSIRANGE_4;
+	osc.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
+	osc.PLL.PLLState = RCC_PLL_OFF;
 
-    if (HAL_RCC_OscConfig(&osc) != HAL_OK)
-    {
-        Error_Handler();
-    }
+	if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+		Error_Handler();
+	}
 
-    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_0) != HAL_OK)
-    {
-        Error_Handler();
-    }
+	if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_0) != HAL_OK) {
+		Error_Handler();
+	}
 
-    if (HAL_RCC_GetHCLKFreq() >= 2000000UL)
-    {
-        Error_Handler();
-    }
+	if (HAL_RCC_GetHCLKFreq() >= 2000000UL) {
+		Error_Handler();
+	}
 
-    HAL_PWREx_EnableLowPowerRunMode();
+	HAL_PWREx_EnableLowPowerRunMode();
 
-    loriota_lprun_active = true;
+	loriota_lprun_active = true;
 }
 
+void Loriota_ExitLowPowerRun(void) {
+	if (!loriota_lprun_active) {
+		return;
+	}
 
-void Loriota_ExitLowPowerRun(void)
-{
-    if (!loriota_lprun_active)
-    {
-        return;
-    }
+	if (HAL_PWREx_DisableLowPowerRunMode() != HAL_OK) {
+		Error_Handler();
+	}
 
-    if (HAL_PWREx_DisableLowPowerRunMode() != HAL_OK)
-    {
-        Error_Handler();
-    }
+	SystemClock_Config();
 
-    SystemClock_Config();
-
-    loriota_lprun_active = false;
+	loriota_lprun_active = false;
 }
 
 void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z) {
