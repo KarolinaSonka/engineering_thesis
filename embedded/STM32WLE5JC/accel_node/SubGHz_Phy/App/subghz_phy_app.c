@@ -314,7 +314,6 @@ static void TxProcess(void)
         wake_from_timer ||
         wake_from_cooldown;
 
-    // Radio transmission completed: enter LPRun
     if (enter_lprun_requested && !has_event)
     {
         enter_lprun_requested = false;
@@ -325,14 +324,12 @@ static void TxProcess(void)
 
     enter_lprun_requested = false;
 
-    // Restore normal clock before ADC, I2C and radio operations
     Loriota_ExitLowPowerRun();
 
     radio_tx_started = false;
 
     Master_Radio_Send();
 
-    // Return to LPRun if the event required no transmission
     if (!radio_tx_started)
     {
         Loriota_EnterLowPowerRun();

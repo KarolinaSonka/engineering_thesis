@@ -225,7 +225,6 @@ void Loriota_EnterLowPowerRun(void)
     RCC_ClkInitTypeDef clk = {0};
     RCC_OscInitTypeDef osc = {0};
 
-    // Switch from PLL to MSI (currently 4 MHz)
     clk.ClockType = RCC_CLOCKTYPE_SYSCLK |
                     RCC_CLOCKTYPE_HCLK |
                     RCC_CLOCKTYPE_HCLK3 |
@@ -243,7 +242,6 @@ void Loriota_EnterLowPowerRun(void)
         Error_Handler();
     }
 
-    // Disable PLL and reduce MSI to 1 MHz
     osc.OscillatorType = RCC_OSCILLATORTYPE_MSI;
     osc.MSIState = RCC_MSI_ON;
     osc.MSIClockRange = RCC_MSIRANGE_4;
@@ -255,7 +253,6 @@ void Loriota_EnterLowPowerRun(void)
         Error_Handler();
     }
 
-    // Update clock configuration and HAL time base
     if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_0) != HAL_OK)
     {
         Error_Handler();
@@ -266,7 +263,6 @@ void Loriota_EnterLowPowerRun(void)
         Error_Handler();
     }
 
-    // Enter Low-power Run mode
     HAL_PWREx_EnableLowPowerRunMode();
 
     loriota_lprun_active = true;
@@ -280,13 +276,11 @@ void Loriota_ExitLowPowerRun(void)
         return;
     }
 
-    // Restore main regulator before increasing frequency
     if (HAL_PWREx_DisableLowPowerRunMode() != HAL_OK)
     {
         Error_Handler();
     }
 
-    // Restore normal 48 MHz system clock
     SystemClock_Config();
 
     loriota_lprun_active = false;
