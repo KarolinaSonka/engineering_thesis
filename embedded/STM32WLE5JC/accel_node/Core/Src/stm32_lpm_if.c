@@ -126,7 +126,17 @@ void PWR_ExitStopMode(void)
 void PWR_EnterSleepMode(void)
 {
   /* USER CODE BEGIN EnterSleepMode_1 */
+	if ((PWR->CR1 & PWR_CR1_LPR) != 0U)
+	{
+	    HAL_SuspendTick();
 
+	    HAL_PWR_EnterSLEEPMode(
+	        PWR_LOWPOWERREGULATOR_ON,
+	        PWR_SLEEPENTRY_WFI
+	    );
+
+	    return;
+	}
   /* USER CODE END EnterSleepMode_1 */
   /* Suspend sysTick */
   HAL_SuspendTick();

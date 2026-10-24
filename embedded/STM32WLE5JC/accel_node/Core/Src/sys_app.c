@@ -43,8 +43,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#ifdef CFG_LPM_SUPPORTED
 #undef CFG_LPM_SUPPORTED
-#define CFG_LPM_SUPPORTED 0
+#endif
+#define CFG_LPM_SUPPORTED 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
