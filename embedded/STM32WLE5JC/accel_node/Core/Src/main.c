@@ -27,6 +27,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdbool.h>
+#include "stm32_lpm.h"
+#include "utilities_def.h"
+
 extern I2C_HandleTypeDef hi2c2;
 /* USER CODE END Includes */
 
@@ -48,13 +52,14 @@ extern I2C_HandleTypeDef hi2c2;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+static bool loriota_lprun_active = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+void Loriota_EnterLowPowerRun(void);
+void Loriota_ExitLowPowerRun(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -138,6 +143,11 @@ int main(void) {
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &val, 1, 100);
 
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+
+	UTIL_LPM_SetStopMode(
+	    (1UL << CFG_LPM_APP_Id),
+	    UTIL_LPM_DISABLE
+	);
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
@@ -205,6 +215,83 @@ void SystemClock_Config(void) {
 }
 
 /* USER CODE BEGIN 4 */
+void Loriota_EnterLowPowerRun(void)
+{
+    if (loriota_lprun_active)
+    {
+        return;
+    }
+
+    RCC_ClkInitTypeDef clk = {0};
+    RCC_OscInitTypeDef osc = {0};
+
+    // Switch from PLL to MSI (currently 4 MHz)
+    clk.ClockType = RCC_CLOCKTYPE_SYSCLK |
+                    RCC_CLOCKTYPE_HCLK |
+                    RCC_CLOCKTYPE_HCLK3 |
+                    RCC_CLOCKTYPE_PCLK1 |
+                    RCC_CLOCKTYPE_PCLK2;
+
+    clk.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+    clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+    clk.AHBCLK3Divider = RCC_SYSCLK_DIV1;
+    clk.APB1CLKDivider = RCC_HCLK_DIV1;
+    clk.APB2CLKDivider = RCC_HCLK_DIV1;
+
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    // Disable PLL and reduce MSI to 1 MHz
+    osc.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+    osc.MSIState = RCC_MSI_ON;
+    osc.MSIClockRange = RCC_MSIRANGE_4;
+    osc.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
+    osc.PLL.PLLState = RCC_PLL_OFF;
+
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    // Update clock configuration and HAL time base
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_0) != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    if (HAL_RCC_GetHCLKFreq() >= 2000000UL)
+    {
+        Error_Handler();
+    }
+
+    // Enter Low-power Run mode
+    HAL_PWREx_EnableLowPowerRunMode();
+
+    loriota_lprun_active = true;
+}
+
+
+void Loriota_ExitLowPowerRun(void)
+{
+    if (!loriota_lprun_active)
+    {
+        return;
+    }
+
+    // Restore main regulator before increasing frequency
+    if (HAL_PWREx_DisableLowPowerRunMode() != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    // Restore normal 48 MHz system clock
+    SystemClock_Config();
+
+    loriota_lprun_active = false;
+}
+
 void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z) {
 	uint8_t data[6] = { 0 };
 	uint8_t int_source = 0;

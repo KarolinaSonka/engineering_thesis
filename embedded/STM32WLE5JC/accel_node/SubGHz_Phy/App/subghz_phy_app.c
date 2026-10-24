@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include "lora_frame.h"
 #include <stdlib.h>
+#include "main.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -68,6 +69,9 @@ volatile bool wake_from_cooldown = false;
 volatile bool is_cooling_down = false;
 
 static int16_t last_x = 0, last_y = 0, last_z = 0;
+
+static volatile bool enter_lprun_requested = false;
+static bool radio_tx_started = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -106,6 +110,8 @@ static void TxTimerCallback(void *context);
 static void CooldownTimerCallback(void *context);
 static void TxProcess(void);
 extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
+extern void Loriota_EnterLowPowerRun(void);
+extern void Loriota_ExitLowPowerRun(void);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -163,8 +169,17 @@ void SubghzApp_Init(void) {
 /* Private functions ---------------------------------------------------------*/
 static void OnTxDone(void) {
 	/* USER CODE BEGIN OnTxDone */
-	UTIL_TIMER_Start(&txTimer);
-	Radio.Sleep();
+
+    Radio.Sleep();
+
+    // Restart periodic report timer after transmission
+    UTIL_TIMER_Stop(&txTimer);
+    UTIL_TIMER_Start(&txTimer);
+
+    // Request LPRun entry from the sequencer, not the IRQ
+    enter_lprun_requested = true;
+    UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+
 	/* USER CODE END OnTxDone */
 }
 
@@ -177,8 +192,13 @@ static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 
 static void OnTxTimeout(void) {
 	/* USER CODE BEGIN OnTxTimeout */
-	Radio.Sleep();
-	UTIL_TIMER_Start(&txTimer);
+	 Radio.Sleep();
+
+	    UTIL_TIMER_Stop(&txTimer);
+	    UTIL_TIMER_Start(&txTimer);
+
+	    enter_lprun_requested = true;
+	    UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	/* USER CODE END OnTxTimeout */
 }
 
@@ -264,10 +284,15 @@ void Master_Radio_Send(void) {
 		}
 	}
 
-	if (should_send) {
-		frame.msg_counter = global_msg_counter++;
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-		Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
+	if (should_send)
+	{
+	    frame.msg_counter = global_msg_counter++;
+
+	    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+
+	    radio_tx_started = true;
+
+	    Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 	}
 }
 
@@ -282,8 +307,36 @@ static void TxTimerCallback(void *context) {
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 }
 
-static void TxProcess(void) {
-	Master_Radio_Send();
+static void TxProcess(void)
+{
+    bool has_event =
+        wake_from_exti ||
+        wake_from_timer ||
+        wake_from_cooldown;
+
+    // Radio transmission completed: enter LPRun
+    if (enter_lprun_requested && !has_event)
+    {
+        enter_lprun_requested = false;
+
+        Loriota_EnterLowPowerRun();
+        return;
+    }
+
+    enter_lprun_requested = false;
+
+    // Restore normal clock before ADC, I2C and radio operations
+    Loriota_ExitLowPowerRun();
+
+    radio_tx_started = false;
+
+    Master_Radio_Send();
+
+    // Return to LPRun if the event required no transmission
+    if (!radio_tx_started)
+    {
+        Loriota_EnterLowPowerRun();
+    }
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
