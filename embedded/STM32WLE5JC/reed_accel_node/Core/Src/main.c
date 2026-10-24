@@ -40,8 +40,8 @@ extern I2C_HandleTypeDef hi2c2;
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define LORIOTA_USE_STOP1 1
-#define LORIOTA_STOP1_DEBUG 0
+#define LORIOTA_USE_STOP0 1
+#define LORIOTA_STOP0_DEBUG 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -136,13 +136,13 @@ int main(void) {
 
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
 
-#if LORIOTA_STOP1_DEBUG
+#if LORIOTA_STOP0_DEBUG
     HAL_DBGMCU_EnableDBGStopMode();
 #endif
 
 	HAL_Delay(15000);
 
-#if LORIOTA_USE_STOP1
+#if LORIOTA_USE_STOP0
 	UTIL_LPM_SetStopMode((1UL << CFG_LPM_APP_Id), UTIL_LPM_ENABLE);
 #endif
 	/* USER CODE END 2 */

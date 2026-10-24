@@ -94,7 +94,7 @@ void PWR_EnterStopMode(void) {
 	/* USER CODE BEGIN EnterStopMode_2 */
 
 	/* USER CODE END EnterStopMode_2 */
-	HAL_PWREx_EnterSTOP1Mode(PWR_STOPENTRY_WFI);
+	HAL_PWREx_EnterSTOP0Mode(PWR_STOPENTRY_WFI);
 	/* USER CODE BEGIN EnterStopMode_3 */
 
 	/* USER CODE END EnterStopMode_3 */
