@@ -238,7 +238,7 @@ static void Loriota_SetRTCWakeup(uint32_t seconds, uint32_t next_stage) {
 	uint32_t divider = (hrtc.Init.AsynchPrediv + 1UL) * (1UL << (8UL + bcdu));
 
 	uint32_t ticks =
-			(uint32_t) (((uint64_t) seconds * LSI_VALUE + divider / 2UL)
+			(uint32_t) (((uint64_t) seconds * LSE_VALUE + divider / 2UL)
 					/ divider);
 
 	if (ticks == 0UL)
@@ -274,7 +274,7 @@ static void Loriota_ConfigureReedWakeup(void) {
 	}
 }
 
-void Loriota_EnterStandby(uint32_t seconds, uint32_t next_stage) {
+void Loriota_EnterShutdown(uint32_t seconds, uint32_t next_stage) {
 	if (next_stage == LORIOTA_STAGE_PERIODIC) {
 		for (uint8_t attempt = 0; attempt < 20; attempt++) {
 			ADXL345_ClearInterrupt();
@@ -339,7 +339,9 @@ void Loriota_EnterStandby(uint32_t seconds, uint32_t next_stage) {
 	__DSB();
 	__ISB();
 
-	HAL_PWR_EnterSTANDBYMode();
+	__HAL_RCC_CLEAR_RESET_FLAGS();
+
+	HAL_PWREx_EnterSHUTDOWNMode();
 
 	Error_Handler();
 }
@@ -406,7 +408,7 @@ static void TxProcess(void) {
 	if (tx_finished) {
 		tx_finished = false;
 
-		Loriota_EnterStandby(next_sleep_seconds, next_sleep_stage);
+		Loriota_EnterShutdown(next_sleep_seconds, next_sleep_stage);
 
 		return;
 	}
@@ -415,11 +417,11 @@ static void TxProcess(void) {
 		uint32_t stage = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR18);
 
 		if (stage == LORIOTA_STAGE_COOLDOWN) {
-			Loriota_EnterStandby(
+			Loriota_EnterShutdown(
 			LORIOTA_COOLDOWN_SECONDS,
 			LORIOTA_STAGE_COOLDOWN);
 		} else {
-			Loriota_EnterStandby(
+			Loriota_EnterShutdown(
 			LORIOTA_REPORT_SECONDS,
 			LORIOTA_STAGE_PERIODIC);
 		}
@@ -430,7 +432,7 @@ static void TxProcess(void) {
 	if (loriota_wake_reason == LORIOTA_WAKE_ACCEL
 			&& Loriota_GetReedState() != 0U
 			&& !Loriota_ReedChangedSinceLastTx()) {
-		Loriota_EnterStandby(
+		Loriota_EnterShutdown(
 		LORIOTA_REPORT_SECONDS,
 		LORIOTA_STAGE_PERIODIC);
 

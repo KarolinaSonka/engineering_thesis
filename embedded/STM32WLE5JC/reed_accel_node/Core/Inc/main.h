@@ -50,9 +50,9 @@ typedef enum
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
 extern LoriotaWakeReason_t loriota_wake_reason;
-extern bool loriota_was_standby;
+extern bool loriota_rtc_preserved;
 
-#define LORIOTA_BKP_MAGIC_VALUE  0x4C4F5249UL
+#define LORIOTA_BKP_MAGIC_VALUE  0x5348444EUL  // SHDN
 #define LORIOTA_STAGE_PERIODIC   1UL
 #define LORIOTA_STAGE_COOLDOWN   2UL
 /* USER CODE END EC */
