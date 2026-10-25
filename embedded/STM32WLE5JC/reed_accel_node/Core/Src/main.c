@@ -27,8 +27,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdbool.h>
 #include "stm32_lpm.h"
 #include "utilities_def.h"
+#include "rtc.h"
 
 extern I2C_HandleTypeDef hi2c2;
 /* USER CODE END Includes */
@@ -40,8 +42,9 @@ extern I2C_HandleTypeDef hi2c2;
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define LORIOTA_USE_STOP2 1
-#define LORIOTA_STOP2_DEBUG 0
+#define LORIOTA_REED_MAGIC       0x4C524545UL
+#define LORIOTA_REED_BKP_MAGIC   RTC_BKP_DR8
+#define LORIOTA_REED_BKP_STATE   RTC_BKP_DR9
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -52,7 +55,13 @@ extern I2C_HandleTypeDef hi2c2;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+LoriotaWakeReason_t loriota_wake_reason = LORIOTA_WAKE_BOOT;
 
+bool loriota_was_standby = false;
+
+static bool loriota_woke_from_accel = false;
+static bool loriota_woke_from_rtc = false;
+static bool loriota_woke_from_reed = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,6 +72,30 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint8_t Loriota_GetReedState(void) {
+	return (HAL_GPIO_ReadPin(REED_GPIO_Port, REED_Pin) == GPIO_PIN_RESET) ?
+			0U : 1U;
+}
+
+bool Loriota_ReedChangedSinceLastTx(void) {
+	uint32_t magic = HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_REED_BKP_MAGIC);
+
+	if (magic != LORIOTA_REED_MAGIC) {
+		return true;
+	}
+
+	uint32_t previous_state = HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_REED_BKP_STATE);
+
+	return Loriota_GetReedState() != previous_state;
+}
+
+void Loriota_SaveReedState(uint8_t state) {
+	HAL_PWR_EnableBkUpAccess();
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_REED_BKP_STATE, state);
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_REED_BKP_MAGIC, LORIOTA_REED_MAGIC);
+}
 
 /* USER CODE END 0 */
 
@@ -82,14 +115,53 @@ int main(void) {
 	HAL_Init();
 
 	/* USER CODE BEGIN Init */
+	loriota_was_standby = (__HAL_PWR_GET_FLAG(PWR_FLAG_SB) != RESET);
 
+	loriota_woke_from_accel = (__HAL_PWR_GET_FLAG(PWR_FLAG_WUF1) != RESET);
+
+	loriota_woke_from_reed = (__HAL_PWR_GET_FLAG(PWR_FLAG_WUF3) != RESET);
+
+	HAL_PWR_DisableWakeUpPin(PWR_WAKEUP_PIN1);
+	HAL_PWR_DisableWakeUpPin(PWR_WAKEUP_PIN3);
+
+	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
 	/* USER CODE END Init */
 
 	/* Configure the system clock */
 	SystemClock_Config();
 
 	/* USER CODE BEGIN SysInit */
+	hrtc.Instance = RTC;
+	__HAL_RCC_RTCAPB_CLK_ENABLE();
 
+	if (!loriota_was_standby) {
+		loriota_wake_reason = LORIOTA_WAKE_BOOT;
+	} else {
+		uint32_t saved_stage = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR18);
+
+		uint32_t magic = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR17);
+
+		loriota_woke_from_rtc = (__HAL_RTC_WAKEUPTIMER_GET_FLAG(
+				&hrtc, RTC_FLAG_WUTF) != RESET);
+
+		if (magic != LORIOTA_BKP_MAGIC_VALUE) {
+			loriota_wake_reason = LORIOTA_WAKE_UNEXPECTED;
+		} else if (loriota_woke_from_reed) {
+			loriota_wake_reason = LORIOTA_WAKE_REED;
+		} else if (loriota_woke_from_accel
+				&& saved_stage == LORIOTA_STAGE_PERIODIC) {
+			loriota_wake_reason = LORIOTA_WAKE_ACCEL;
+		} else if (loriota_woke_from_rtc
+				&& saved_stage == LORIOTA_STAGE_COOLDOWN) {
+			loriota_wake_reason = LORIOTA_WAKE_COOLDOWN_END;
+		} else if (loriota_woke_from_rtc
+				&& saved_stage == LORIOTA_STAGE_PERIODIC) {
+			loriota_wake_reason = LORIOTA_WAKE_PERIODIC;
+		} else {
+			loriota_wake_reason = LORIOTA_WAKE_UNEXPECTED;
+		}
+	}
 	/* USER CODE END SysInit */
 
 	/* Initialize all configured peripherals */
@@ -99,8 +171,22 @@ int main(void) {
 	MX_I2C2_Init();
 	MX_ADC_Init();
 	/* USER CODE BEGIN 2 */
+	if (HAL_RTCEx_DeactivateWakeUpTimer(&hrtc) != HAL_OK) {
+		Error_Handler();
+	}
+
+	HAL_NVIC_ClearPendingIRQ(RTC_WKUP_IRQn);
+	HAL_NVIC_SetPriority(RTC_WKUP_IRQn, 1, 0);
+	HAL_NVIC_EnableIRQ(RTC_WKUP_IRQn);
+
 	uint8_t adxl_init_data = 0x08;
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &adxl_init_data, 1, 100);
+
+	HAL_Delay(200);
+
+	HAL_I2C_DeInit(&hi2c2);
+	MX_I2C2_Init();
+	HAL_Delay(10);
 
 	uint8_t val;
 	// set standby mode to allow safe configuration
@@ -136,15 +222,14 @@ int main(void) {
 
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
 
-#if LORIOTA_STOP2_DEBUG
-    HAL_DBGMCU_EnableDBGStopMode();
-#endif
+	if (loriota_wake_reason == LORIOTA_WAKE_BOOT) {
+		HAL_Delay(15000);
+	}
 
-	HAL_Delay(15000);
+	if (loriota_wake_reason == LORIOTA_WAKE_UNEXPECTED) {
+		Error_Handler();
+	}
 
-#if LORIOTA_USE_STOP2
-	UTIL_LPM_SetStopMode((1UL << CFG_LPM_APP_Id), UTIL_LPM_ENABLE);
-#endif
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
