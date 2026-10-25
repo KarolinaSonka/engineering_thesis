@@ -55,6 +55,7 @@ extern bool loriota_rtc_preserved;
 #define LORIOTA_BKP_MAGIC_VALUE  0x5348444EUL  // SHDN
 #define LORIOTA_STAGE_PERIODIC   1UL
 #define LORIOTA_STAGE_COOLDOWN   2UL
+#define LORIOTA_SHUTDOWN_ARMED 0x53484457UL
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/

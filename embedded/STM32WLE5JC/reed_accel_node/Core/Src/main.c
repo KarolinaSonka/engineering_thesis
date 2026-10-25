@@ -60,6 +60,8 @@ LoriotaWakeReason_t loriota_wake_reason = LORIOTA_WAKE_BOOT;
 bool loriota_rtc_preserved = false;
 
 static bool loriota_woke_from_rtc = false;
+
+static bool loriota_was_shutdown = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -123,6 +125,12 @@ int main(void) {
 	hrtc.Instance = RTC;
 	__HAL_RCC_RTCAPB_CLK_ENABLE();
 
+	uint32_t shutdown_marker =
+	    HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR16);
+
+	loriota_was_shutdown =
+	    (shutdown_marker == LORIOTA_SHUTDOWN_ARMED);
+
 	uint32_t magic = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR17);
 
 	loriota_rtc_preserved = (magic == LORIOTA_BKP_MAGIC_VALUE);
@@ -139,6 +147,14 @@ int main(void) {
 	MX_I2C2_Init();
 	MX_ADC_Init();
 	/* USER CODE BEGIN 2 */
+	HAL_PWR_EnableBkUpAccess();
+
+	HAL_RTCEx_BKUPWrite(
+	    &hrtc,
+	    RTC_BKP_DR16,
+	    0UL
+	);
+
 	if (loriota_rtc_preserved) {
 		uint32_t saved_stage = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR18);
 
@@ -212,8 +228,9 @@ int main(void) {
 	val = 0x08;
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &val, 1, 100);
 
-	if (loriota_wake_reason == LORIOTA_WAKE_BOOT) {
-		HAL_Delay(15000);
+	if (!loriota_was_shutdown)
+	{
+	    HAL_Delay(15000);
 	}
 
 	/* USER CODE END 2 */

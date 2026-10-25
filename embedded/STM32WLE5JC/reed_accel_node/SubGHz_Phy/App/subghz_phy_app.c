@@ -328,8 +328,15 @@ void Loriota_EnterShutdown(uint32_t seconds, uint32_t next_stage) {
 
 	Loriota_ConfigureReedWakeup();
 
-	HAL_GPIO_WritePin(
-	GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+
+	HAL_PWR_EnableBkUpAccess();
+
+	HAL_RTCEx_BKUPWrite(
+	    &hrtc,
+	    RTC_BKP_DR16,
+	    LORIOTA_SHUTDOWN_ARMED
+	);
 
 	HAL_NVIC_DisableIRQ(TIM17_IRQn);
 	HAL_NVIC_ClearPendingIRQ(TIM17_IRQn);
@@ -338,8 +345,6 @@ void Loriota_EnterShutdown(uint32_t seconds, uint32_t next_stage) {
 
 	__DSB();
 	__ISB();
-
-	__HAL_RCC_CLEAR_RESET_FLAGS();
 
 	HAL_PWREx_EnterSHUTDOWNMode();
 
