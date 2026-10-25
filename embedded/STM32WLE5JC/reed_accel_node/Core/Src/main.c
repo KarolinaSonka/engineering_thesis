@@ -60,10 +60,6 @@ LoriotaWakeReason_t loriota_wake_reason = LORIOTA_WAKE_BOOT;
 bool loriota_rtc_preserved = false;
 
 static bool loriota_woke_from_rtc = false;
-
-static uint32_t loriota_reset_flags = 0;
-
-static bool loriota_manual_restart = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -117,11 +113,7 @@ int main(void) {
 	HAL_Init();
 
 	/* USER CODE BEGIN Init */
-	loriota_reset_flags = RCC->CSR;
 
-	loriota_manual_restart = ((loriota_reset_flags & (RCC_CSR_PINRSTF |
-	RCC_CSR_SFTRSTF |
-	RCC_CSR_OBLRSTF)) != 0U);
 	/* USER CODE END Init */
 
 	/* Configure the system clock */
@@ -171,10 +163,6 @@ int main(void) {
 			loriota_wake_reason = LORIOTA_WAKE_BOOT;
 		}
 	}
-	if (loriota_manual_restart) {
-		loriota_wake_reason = LORIOTA_WAKE_BOOT;
-	}
-
 	if (HAL_RTCEx_DeactivateWakeUpTimer(&hrtc) != HAL_OK) {
 		Error_Handler();
 	}
