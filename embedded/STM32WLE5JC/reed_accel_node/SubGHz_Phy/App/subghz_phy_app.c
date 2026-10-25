@@ -71,6 +71,9 @@ volatile bool vibration_active = false;
 
 static uint8_t last_reed_state = 0xFF;
 static uint32_t last_reed_time = 0;
+
+static volatile bool enter_lprun_requested = false;
+static bool radio_tx_started = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -108,6 +111,8 @@ static void TxTimerCallback(void *context);
 static void VibrationTimerCallback(void *context);
 static void TxProcess(void);
 extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
+extern void Loriota_EnterLowPowerRun(void);
+extern void Loriota_ExitLowPowerRun(void);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -168,8 +173,13 @@ void SubghzApp_Init(void)
 static void OnTxDone(void)
 {
   /* USER CODE BEGIN OnTxDone */
-	UTIL_TIMER_Start(&txTimer);
 	Radio.Sleep();
+
+	UTIL_TIMER_Stop(&txTimer);
+	UTIL_TIMER_Start(&txTimer);
+
+	enter_lprun_requested = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
   /* USER CODE END OnTxDone */
 }
 
@@ -184,7 +194,12 @@ static void OnTxTimeout(void)
 {
   /* USER CODE BEGIN OnTxTimeout */
 	Radio.Sleep();
+
+	UTIL_TIMER_Stop(&txTimer);
 	UTIL_TIMER_Start(&txTimer);
+
+	enter_lprun_requested = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
   /* USER CODE END OnTxTimeout */
 }
 
@@ -318,6 +333,8 @@ void Master_Radio_Send(void) {
 		}
 
 		frame.msg_counter = global_msg_counter++;
+
+		radio_tx_started = true;
 		Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 	}
 }
@@ -332,8 +349,33 @@ static void TxTimerCallback(void *context) {
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 }
 
-static void TxProcess(void) {
-	Master_Radio_Send();
+static void TxProcess(void)
+{
+    bool has_event =
+        wake_from_accel ||
+        wake_from_reed ||
+        wake_from_timer ||
+        wake_from_vibration_end;
+
+    if (enter_lprun_requested && !has_event)
+    {
+        enter_lprun_requested = false;
+        Loriota_EnterLowPowerRun();
+        return;
+    }
+
+    enter_lprun_requested = false;
+
+    Loriota_ExitLowPowerRun();
+
+    radio_tx_started = false;
+
+    Master_Radio_Send();
+
+    if (!radio_tx_started)
+    {
+        Loriota_EnterLowPowerRun();
+    }
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {

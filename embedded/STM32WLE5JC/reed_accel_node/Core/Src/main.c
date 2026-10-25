@@ -27,6 +27,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdbool.h>
 extern I2C_HandleTypeDef hi2c2;
 /* USER CODE END Includes */
 
@@ -48,7 +49,7 @@ extern I2C_HandleTypeDef hi2c2;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+static bool loriota_lprun_active = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -59,7 +60,61 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void Loriota_EnterLowPowerRun(void)
+{
+    if (loriota_lprun_active)
+        return;
 
+    RCC_ClkInitTypeDef clk = {0};
+    RCC_OscInitTypeDef osc = {0};
+
+    clk.ClockType = RCC_CLOCKTYPE_SYSCLK |
+                    RCC_CLOCKTYPE_HCLK |
+                    RCC_CLOCKTYPE_HCLK3 |
+                    RCC_CLOCKTYPE_PCLK1 |
+                    RCC_CLOCKTYPE_PCLK2;
+
+    clk.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+    clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+    clk.AHBCLK3Divider = RCC_SYSCLK_DIV1;
+    clk.APB1CLKDivider = RCC_HCLK_DIV1;
+    clk.APB2CLKDivider = RCC_HCLK_DIV1;
+
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK)
+        Error_Handler();
+
+    osc.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+    osc.MSIState = RCC_MSI_ON;
+    osc.MSIClockRange = RCC_MSIRANGE_4;
+    osc.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
+    osc.PLL.PLLState = RCC_PLL_OFF;
+
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK)
+        Error_Handler();
+
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_0) != HAL_OK)
+        Error_Handler();
+
+    if (HAL_RCC_GetHCLKFreq() >= 2000000UL)
+        Error_Handler();
+
+    HAL_PWREx_EnableLowPowerRunMode();
+
+    loriota_lprun_active = true;
+}
+
+void Loriota_ExitLowPowerRun(void)
+{
+    if (!loriota_lprun_active)
+        return;
+
+    if (HAL_PWREx_DisableLowPowerRunMode() != HAL_OK)
+        Error_Handler();
+
+    SystemClock_Config();
+
+    loriota_lprun_active = false;
+}
 /* USER CODE END 0 */
 
 /**
