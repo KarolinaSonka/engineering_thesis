@@ -27,6 +27,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdbool.h>
+#include "stm32_lpm.h"
+#include "utilities_def.h"
+#include "rtc.h"
+
 extern I2C_HandleTypeDef hi2c2;
 /* USER CODE END Includes */
 
@@ -37,7 +42,9 @@ extern I2C_HandleTypeDef hi2c2;
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define LORIOTA_REED_MAGIC       0x4C524545UL
+#define LORIOTA_REED_BKP_MAGIC   RTC_BKP_DR8
+#define LORIOTA_REED_BKP_STATE   RTC_BKP_DR9
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,7 +55,13 @@ extern I2C_HandleTypeDef hi2c2;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+LoriotaWakeReason_t loriota_wake_reason = LORIOTA_WAKE_BOOT;
 
+bool loriota_was_standby = false;
+
+static bool loriota_woke_from_accel = false;
+static bool loriota_woke_from_rtc = false;
+static bool loriota_woke_from_reed = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -59,45 +72,121 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint8_t Loriota_GetReedState(void) {
+	return (HAL_GPIO_ReadPin(REED_GPIO_Port, REED_Pin) == GPIO_PIN_RESET) ?
+			0U : 1U;
+}
+
+bool Loriota_ReedChangedSinceLastTx(void) {
+	uint32_t magic = HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_REED_BKP_MAGIC);
+
+	if (magic != LORIOTA_REED_MAGIC) {
+		return true;
+	}
+
+	uint32_t previous_state = HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_REED_BKP_STATE);
+
+	return Loriota_GetReedState() != previous_state;
+}
+
+void Loriota_SaveReedState(uint8_t state) {
+	HAL_PWR_EnableBkUpAccess();
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_REED_BKP_STATE, state);
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_REED_BKP_MAGIC, LORIOTA_REED_MAGIC);
+}
 
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
-int main(void)
-{
+ * @brief  The application entry point.
+ * @retval int
+ */
+int main(void) {
 
-  /* USER CODE BEGIN 1 */
+	/* USER CODE BEGIN 1 */
 
-  /* USER CODE END 1 */
+	/* USER CODE END 1 */
 
-  /* MCU Configuration--------------------------------------------------------*/
+	/* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	HAL_Init();
 
-  /* USER CODE BEGIN Init */
+	/* USER CODE BEGIN Init */
+	loriota_was_standby = (__HAL_PWR_GET_FLAG(PWR_FLAG_SB) != RESET);
 
-  /* USER CODE END Init */
+	loriota_woke_from_accel = (__HAL_PWR_GET_FLAG(PWR_FLAG_WUF1) != RESET);
 
-  /* Configure the system clock */
-  SystemClock_Config();
+	loriota_woke_from_reed = (__HAL_PWR_GET_FLAG(PWR_FLAG_WUF3) != RESET);
 
-  /* USER CODE BEGIN SysInit */
+	HAL_PWR_DisableWakeUpPin(PWR_WAKEUP_PIN1);
+	HAL_PWR_DisableWakeUpPin(PWR_WAKEUP_PIN3);
 
-  /* USER CODE END SysInit */
+	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
+	/* USER CODE END Init */
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_RTC_Init();
-  MX_SubGHz_Phy_Init();
-  MX_I2C2_Init();
-  MX_ADC_Init();
-  /* USER CODE BEGIN 2 */
+	/* Configure the system clock */
+	SystemClock_Config();
+
+	/* USER CODE BEGIN SysInit */
+	hrtc.Instance = RTC;
+	__HAL_RCC_RTCAPB_CLK_ENABLE();
+
+	if (!loriota_was_standby) {
+		loriota_wake_reason = LORIOTA_WAKE_BOOT;
+	} else {
+		uint32_t saved_stage = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR18);
+
+		uint32_t magic = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR17);
+
+		loriota_woke_from_rtc = (__HAL_RTC_WAKEUPTIMER_GET_FLAG(
+				&hrtc, RTC_FLAG_WUTF) != RESET);
+
+		if (magic != LORIOTA_BKP_MAGIC_VALUE) {
+			loriota_wake_reason = LORIOTA_WAKE_UNEXPECTED;
+		} else if (loriota_woke_from_reed) {
+			loriota_wake_reason = LORIOTA_WAKE_REED;
+		} else if (loriota_woke_from_accel
+				&& saved_stage == LORIOTA_STAGE_PERIODIC) {
+			loriota_wake_reason = LORIOTA_WAKE_ACCEL;
+		} else if (loriota_woke_from_rtc
+				&& saved_stage == LORIOTA_STAGE_COOLDOWN) {
+			loriota_wake_reason = LORIOTA_WAKE_COOLDOWN_END;
+		} else if (loriota_woke_from_rtc
+				&& saved_stage == LORIOTA_STAGE_PERIODIC) {
+			loriota_wake_reason = LORIOTA_WAKE_PERIODIC;
+		} else {
+			loriota_wake_reason = LORIOTA_WAKE_UNEXPECTED;
+		}
+	}
+	/* USER CODE END SysInit */
+
+	/* Initialize all configured peripherals */
+	MX_GPIO_Init();
+	MX_RTC_Init();
+	MX_SubGHz_Phy_Init();
+	MX_I2C2_Init();
+	MX_ADC_Init();
+	/* USER CODE BEGIN 2 */
+	if (HAL_RTCEx_DeactivateWakeUpTimer(&hrtc) != HAL_OK) {
+		Error_Handler();
+	}
+
+	HAL_NVIC_ClearPendingIRQ(RTC_WKUP_IRQn);
+	HAL_NVIC_SetPriority(RTC_WKUP_IRQn, 1, 0);
+	HAL_NVIC_EnableIRQ(RTC_WKUP_IRQn);
+
 	uint8_t adxl_init_data = 0x08;
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &adxl_init_data, 1, 100);
+
+	HAL_Delay(200);
+
+	HAL_I2C_DeInit(&hi2c2);
+	MX_I2C2_Init();
+	HAL_Delay(10);
 
 	uint8_t val;
 	// set standby mode to allow safe configuration
@@ -132,78 +221,79 @@ int main(void)
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &val, 1, 100);
 
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-  /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-	while (1) {
-    /* USER CODE END WHILE */
-    MX_SubGHz_Phy_Process();
-
-    /* USER CODE BEGIN 3 */
-    HAL_PWR_EnterSLEEPMode(
-            PWR_MAINREGULATOR_ON,
-            PWR_SLEEPENTRY_WFI
-        );
+	if (loriota_wake_reason == LORIOTA_WAKE_BOOT) {
+		HAL_Delay(15000);
 	}
-  /* USER CODE END 3 */
+
+	if (loriota_wake_reason == LORIOTA_WAKE_UNEXPECTED) {
+		Error_Handler();
+	}
+
+	/* USER CODE END 2 */
+
+	/* Infinite loop */
+	/* USER CODE BEGIN WHILE */
+	while (1) {
+		/* USER CODE END WHILE */
+		MX_SubGHz_Phy_Process();
+
+		/* USER CODE BEGIN 3 */
+	}
+	/* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
-void SystemClock_Config(void)
-{
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+ * @brief System Clock Configuration
+ * @retval None
+ */
+void SystemClock_Config(void) {
+	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
+	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
 
-  /** Configure LSE Drive Capability
-  */
-  HAL_PWR_EnableBkUpAccess();
-  __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
+	/** Configure LSE Drive Capability
+	 */
+	HAL_PWR_EnableBkUpAccess();
+	__HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
 
-  /** Configure the main internal regulator output voltage
-  */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+	/** Configure the main internal regulator output voltage
+	 */
+	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_LSE
-                              |RCC_OSCILLATORTYPE_MSI;
-  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
-  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
-  RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-  RCC_OscInitStruct.LSIDiv = RCC_LSI_DIV1;
-  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
-  RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV1;
-  RCC_OscInitStruct.PLL.PLLN = 24;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/** Initializes the CPU, AHB and APB buses clocks
+	 */
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI
+			| RCC_OSCILLATORTYPE_LSE | RCC_OSCILLATORTYPE_MSI;
+	RCC_OscInitStruct.LSEState = RCC_LSE_ON;
+	RCC_OscInitStruct.MSIState = RCC_MSI_ON;
+	RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
+	RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
+	RCC_OscInitStruct.LSIDiv = RCC_LSI_DIV1;
+	RCC_OscInitStruct.LSIState = RCC_LSI_ON;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
+	RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV1;
+	RCC_OscInitStruct.PLL.PLLN = 24;
+	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+	RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
+	RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
+	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+		Error_Handler();
+	}
 
-  /** Configure the SYSCLKSource, HCLK, PCLK1 and PCLK2 clocks dividers
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK3|RCC_CLOCKTYPE_HCLK
-                              |RCC_CLOCKTYPE_SYSCLK|RCC_CLOCKTYPE_PCLK1
-                              |RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLK3Divider = RCC_SYSCLK_DIV1;
+	/** Configure the SYSCLKSource, HCLK, PCLK1 and PCLK2 clocks dividers
+	 */
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK3 | RCC_CLOCKTYPE_HCLK
+			| RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+	RCC_ClkInitStruct.AHBCLK3Divider = RCC_SYSCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
+		Error_Handler();
+	}
 }
 
 /* USER CODE BEGIN 4 */
@@ -228,39 +318,36 @@ void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z) {
 /* USER CODE END 4 */
 
 /**
-  * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM17 interrupt took place, inside
-  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
-  * a global variable "uwTick" used as application time base.
-  * @param  htim : TIM handle
-  * @retval None
-  */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  /* USER CODE BEGIN Callback 0 */
+ * @brief  Period elapsed callback in non blocking mode
+ * @note   This function is called  when TIM17 interrupt took place, inside
+ * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+ * a global variable "uwTick" used as application time base.
+ * @param  htim : TIM handle
+ * @retval None
+ */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	/* USER CODE BEGIN Callback 0 */
 
-  /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM17)
-  {
-    HAL_IncTick();
-  }
-  /* USER CODE BEGIN Callback 1 */
+	/* USER CODE END Callback 0 */
+	if (htim->Instance == TIM17) {
+		HAL_IncTick();
+	}
+	/* USER CODE BEGIN Callback 1 */
 
-  /* USER CODE END Callback 1 */
+	/* USER CODE END Callback 1 */
 }
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
+void Error_Handler(void) {
+	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
 	while (1) {
 	}
-  /* USER CODE END Error_Handler_Debug */
+	/* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
 /**

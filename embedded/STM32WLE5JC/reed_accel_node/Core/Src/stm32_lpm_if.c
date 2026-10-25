@@ -1,21 +1,21 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    stm32_lpm_if.c
-  * @author  MCD Application Team
-  * @brief   Low layer function to enter/exit low power modes (stop, sleep)
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    stm32_lpm_if.c
+ * @author  MCD Application Team
+ * @brief   Low layer function to enter/exit low power modes (stop, sleep)
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -24,7 +24,9 @@
 #include "stm32_lpm_if.h"
 
 /* USER CODE BEGIN Includes */
-
+#include "main.h"
+#include "i2c.h"
+#include "adc.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -69,7 +71,7 @@ const struct UTIL_LPM_Driver_s UTIL_PowerDriver =
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
-
+extern void SystemClock_Config(void);
 /* USER CODE END PFP */
 
 /* Exported functions --------------------------------------------------------*/
@@ -109,6 +111,9 @@ void PWR_EnterStopMode(void)
 void PWR_ExitStopMode(void)
 {
   /* USER CODE BEGIN ExitStopMode_1 */
+	SystemClock_Config();
+	MX_I2C2_Init();
+	MX_ADC_Init();
 
   /* USER CODE END ExitStopMode_1 */
   /* Resume sysTick : work around for debugger problem in dual core */
