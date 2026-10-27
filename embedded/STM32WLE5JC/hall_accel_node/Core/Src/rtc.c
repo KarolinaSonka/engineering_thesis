@@ -1,27 +1,29 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    rtc.c
-  * @brief   This file provides code for the configuration
-  *          of the RTC instances.
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    rtc.c
+ * @brief   This file provides code for the configuration
+ *          of the RTC instances.
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "rtc.h"
 
 /* USER CODE BEGIN 0 */
+#include <stdbool.h>
 
+extern bool loriota_rtc_preserved;
 /* USER CODE END 0 */
 
 RTC_HandleTypeDef hrtc;
@@ -31,7 +33,19 @@ void MX_RTC_Init(void)
 {
 
   /* USER CODE BEGIN RTC_Init 0 */
+	if (loriota_rtc_preserved) {
+		hrtc.Instance = RTC;
 
+		hrtc.Init.AsynchPrediv = 31;
+		hrtc.Init.BinMode = RTC_BINARY_ONLY;
+
+		HAL_RTC_MspInit(&hrtc);
+
+		hrtc.Lock = HAL_UNLOCKED;
+		hrtc.State = HAL_RTC_STATE_READY;
+
+		return;
+	}
   /* USER CODE END RTC_Init 0 */
 
   RTC_AlarmTypeDef sAlarm = {0};
@@ -100,8 +114,8 @@ void HAL_RTC_MspInit(RTC_HandleTypeDef* rtcHandle)
     __HAL_RCC_RTC_ENABLE();
     __HAL_RCC_RTCAPB_CLK_ENABLE();
   /* USER CODE BEGIN RTC_MspInit 1 */
-    HAL_NVIC_SetPriority(RTC_Alarm_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
+		HAL_NVIC_DisableIRQ(RTC_Alarm_IRQn);
+		HAL_NVIC_ClearPendingIRQ(RTC_Alarm_IRQn);
   /* USER CODE END RTC_MspInit 1 */
   }
 }
@@ -118,7 +132,7 @@ void HAL_RTC_MspDeInit(RTC_HandleTypeDef* rtcHandle)
     __HAL_RCC_RTC_DISABLE();
     __HAL_RCC_RTCAPB_CLK_DISABLE();
   /* USER CODE BEGIN RTC_MspDeInit 1 */
-    HAL_NVIC_DisableIRQ(RTC_Alarm_IRQn);
+		HAL_NVIC_DisableIRQ(RTC_Alarm_IRQn);
   /* USER CODE END RTC_MspDeInit 1 */
   }
 }
