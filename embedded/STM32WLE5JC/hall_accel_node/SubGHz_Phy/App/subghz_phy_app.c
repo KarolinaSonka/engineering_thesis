@@ -15,17 +15,27 @@
 
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include <stdbool.h>
 #include "utilities_def.h"
 #include "stm32_lpm.h"
 #include "stm32_seq.h"
 #include "stm32_timer.h"
 #include <stdio.h>
 #include "lora_frame.h"
+#include "rtc.h"
+#include "main.h"
+#include "i2c.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
 /* USER CODE BEGIN EV */
+/* USER CODE BEGIN EV */
+
 extern ADC_HandleTypeDef hadc;
+
+extern bool loriota_was_shutdown;
+extern bool loriota_woke_from_rtc;
+
 /* USER CODE END EV */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -81,6 +91,10 @@ volatile bool vibration_active = false;
 
 static uint8_t last_hall_state = 0xFF;
 static uint32_t state_change_time = 0;
+
+extern bool loriota_was_shutdown;
+extern bool loriota_rtc_preserved;
+extern bool loriota_woke_from_rtc;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -90,28 +104,27 @@ static uint32_t state_change_time = 0;
 static void OnTxDone(void);
 
 /**
- * @brief Function to be executed on Radio Rx Done event
- * @param  payload ptr of buffer received
- * @param  size buffer size
- * @param  rssi
- * @param  LoraSnr_FskCfo
- */
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
-		int8_t LoraSnr_FskCfo);
+  * @brief Function to be executed on Radio Rx Done event
+  * @param  payload ptr of buffer received
+  * @param  size buffer size
+  * @param  rssi
+  * @param  LoraSnr_FskCfo
+  */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
 
 /**
- * @brief Function executed on Radio Tx Timeout event
- */
+  * @brief Function executed on Radio Tx Timeout event
+  */
 static void OnTxTimeout(void);
 
 /**
- * @brief Function executed on Radio Rx Timeout event
- */
+  * @brief Function executed on Radio Rx Timeout event
+  */
 static void OnRxTimeout(void);
 
 /**
- * @brief Function executed on Radio Rx Error event
- */
+  * @brief Function executed on Radio Rx Error event
+  */
 static void OnRxError(void);
 
 /* USER CODE BEGIN PFP */
@@ -123,21 +136,22 @@ static void HallPollTimerCallback(void *context);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
-void SubghzApp_Init(void) {
-	/* USER CODE BEGIN SubghzApp_Init_1 */
+void SubghzApp_Init(void)
+{
+  /* USER CODE BEGIN SubghzApp_Init_1 */
 
-	/* USER CODE END SubghzApp_Init_1 */
+  /* USER CODE END SubghzApp_Init_1 */
 
-	/* Radio initialization */
-	RadioEvents.TxDone = OnTxDone;
-	RadioEvents.RxDone = OnRxDone;
-	RadioEvents.TxTimeout = OnTxTimeout;
-	RadioEvents.RxTimeout = OnRxTimeout;
-	RadioEvents.RxError = OnRxError;
+  /* Radio initialization */
+  RadioEvents.TxDone = OnTxDone;
+  RadioEvents.RxDone = OnRxDone;
+  RadioEvents.TxTimeout = OnTxTimeout;
+  RadioEvents.RxTimeout = OnRxTimeout;
+  RadioEvents.RxError = OnRxError;
 
-	Radio.Init(&RadioEvents);
+  Radio.Init(&RadioEvents);
 
-	/* USER CODE BEGIN SubghzApp_Init_2 */
+  /* USER CODE BEGIN SubghzApp_Init_2 */
 
 	Radio.SetChannel(RF_FREQUENCY);
 	Radio.SetTxConfig(MODEM_LORA,
@@ -157,29 +171,32 @@ void SubghzApp_Init(void) {
 
 	UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
 
-	// 15 minutes from the last completed transmission
 	UTIL_TIMER_Create(&txTimer,
 	TX_REPORT_INTERVAL_MS, UTIL_TIMER_ONESHOT, TxTimerCallback,
 	NULL);
 
-	// end vibration alarm after 10 seconds
 	UTIL_TIMER_Create(&vibrationTimer, 10000, UTIL_TIMER_ONESHOT,
 			VibrationTimerCallback,
 			NULL);
 
-	// periodic Hall sensor measurement
 	UTIL_TIMER_Create(&hallPollTimer,
 	HALL_POLL_INTERVAL_MS, UTIL_TIMER_PERIODIC, HallPollTimerCallback,
 	NULL);
 
+	last_hall_state = 0xFF;
+	global_msg_counter = 0;
+	vibration_active = false;
+
+	UTIL_TIMER_Start(&txTimer);
 	UTIL_TIMER_Start(&hallPollTimer);
 
+	// Initial transmission
 	wake_from_timer = true;
+
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 
-	// Keep radio asleep until transmission
 	Radio.Sleep();
-	/* USER CODE END SubghzApp_Init_2 */
+  /* USER CODE END SubghzApp_Init_2 */
 }
 
 /* USER CODE BEGIN EF */
@@ -187,9 +204,9 @@ void SubghzApp_Init(void) {
 /* USER CODE END EF */
 
 /* Private functions ---------------------------------------------------------*/
-static void OnTxDone(void) {
-	/* USER CODE BEGIN OnTxDone */
-
+static void OnTxDone(void)
+{
+  /* USER CODE BEGIN OnTxDone */
 	Radio.Sleep();
 
 	radio_tx_busy = false;
@@ -197,22 +214,20 @@ static void OnTxDone(void) {
 	UTIL_TIMER_Stop(&txTimer);
 	UTIL_TIMER_Start(&txTimer);
 
-	if (wake_from_accel || wake_from_hall || wake_from_timer
-			|| wake_from_vibration_end) {
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	}
-	/* USER CODE END OnTxDone */
+	UTIL_LPM_SetStopMode((1UL << CFG_LPM_RADIO_TX_Id), UTIL_LPM_ENABLE);
+  /* USER CODE END OnTxDone */
 }
 
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
-		int8_t LoraSnr_FskCfo) {
-	/* USER CODE BEGIN OnRxDone */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
+{
+  /* USER CODE BEGIN OnRxDone */
 	Radio.Sleep();
-	/* USER CODE END OnRxDone */
+  /* USER CODE END OnRxDone */
 }
 
-static void OnTxTimeout(void) {
-	/* USER CODE BEGIN OnTxTimeout */
+static void OnTxTimeout(void)
+{
+  /* USER CODE BEGIN OnTxTimeout */
 	Radio.Sleep();
 
 	radio_tx_busy = false;
@@ -220,22 +235,21 @@ static void OnTxTimeout(void) {
 	UTIL_TIMER_Stop(&txTimer);
 	UTIL_TIMER_Start(&txTimer);
 
-	if (wake_from_accel || wake_from_hall || wake_from_timer
-			|| wake_from_vibration_end) {
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	}
-	/* USER CODE END OnTxTimeout */
+	UTIL_LPM_SetStopMode((1UL << CFG_LPM_RADIO_TX_Id), UTIL_LPM_ENABLE);
+  /* USER CODE END OnTxTimeout */
 }
 
-static void OnRxTimeout(void) {
-	/* USER CODE BEGIN OnRxTimeout */
+static void OnRxTimeout(void)
+{
+  /* USER CODE BEGIN OnRxTimeout */
 	Radio.Sleep();
-	/* USER CODE END OnRxTimeout */
+  /* USER CODE END OnRxTimeout */
 }
 
-static void OnRxError(void) {
-	/* USER CODE BEGIN OnRxError */
-	/* USER CODE END OnRxError */
+static void OnRxError(void)
+{
+  /* USER CODE BEGIN OnRxError */
+  /* USER CODE END OnRxError */
 }
 
 /* USER CODE BEGIN PrFD */
@@ -312,9 +326,8 @@ void Master_Radio_Send(void) {
 
 		vibration_active = false;
 
-		UTIL_TIMER_Stop(&vibrationTimer);
-
 		state_change_time = HAL_GetTick();
+		UTIL_TIMER_Stop(&vibrationTimer);
 	}
 
 	if (is_vib_end) {
@@ -327,22 +340,20 @@ void Master_Radio_Send(void) {
 
 	if (!is_door_closed && vibration_active) {
 		vibration_active = false;
-
 		UTIL_TIMER_Stop(&vibrationTimer);
 	}
 
-	if (is_accel && is_door_closed && !hall_changed) {
-		if (HAL_GetTick() - state_change_time >=
-		STATE_CHANGE_DELAY) {
-			if (!vibration_active) {
-				should_send = true;
-			}
+	if (is_accel && is_door_closed && !hall_changed)
+	{
+	    if (!vibration_active)
+	    {
+	        should_send = true;
+	    }
 
-			vibration_active = true;
+	    vibration_active = true;
 
-			UTIL_TIMER_Stop(&vibrationTimer);
-			UTIL_TIMER_Start(&vibrationTimer);
-		}
+	    UTIL_TIMER_Stop(&vibrationTimer);
+	    UTIL_TIMER_Start(&vibrationTimer);
 	}
 
 	int16_t acc_x = 0;
@@ -398,7 +409,11 @@ void Master_Radio_Send(void) {
 	}
 
 	frame.msg_counter = global_msg_counter++;
+
+	UTIL_LPM_SetStopMode((1UL << CFG_LPM_RADIO_TX_Id), UTIL_LPM_DISABLE);
+
 	radio_tx_busy = true;
+
 	Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 }
 
@@ -412,8 +427,9 @@ static void TxTimerCallback(void *context) {
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 }
 
-static void TxProcess(void) {
-	Master_Radio_Send();
+static void TxProcess(void)
+{
+    Master_Radio_Send();
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {

@@ -1,21 +1,21 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    sys_app.c
-  * @author  MCD Application Team
-  * @brief   Initializes HW and SW system entities (not related to the radio)
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    sys_app.c
+ * @author  MCD Application Team
+ * @brief   Initializes HW and SW system entities (not related to the radio)
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -43,7 +43,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define CFG_LPM_SUPPORTED 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -74,7 +74,9 @@ void SystemApp_Init(void)
 
 	UTIL_LPM_Init();
 
-	UTIL_LPM_SetOffMode((1 << CFG_LPM_APP_Id),UTIL_LPM_DISABLE);
+	UTIL_LPM_SetOffMode((1 << CFG_LPM_APP_Id), UTIL_LPM_DISABLE);
+
+	UTIL_LPM_SetStopMode((1UL << CFG_LPM_APP_Id), UTIL_LPM_DISABLE);
   /* USER CODE END SystemApp_Init_1 */
 
 }
@@ -85,10 +87,9 @@ void SystemApp_Init(void)
 
 /* Private functions ---------------------------------------------------------*/
 /* USER CODE BEGIN PrFD */
-void UTIL_SEQ_Idle(void)
-{
+void UTIL_SEQ_Idle(void) {
 #if (CFG_LPM_SUPPORTED == 1)
-  UTIL_LPM_EnterLowPower();
+	UTIL_LPM_EnterLowPower();
 #endif
 }
 /* USER CODE END PrFD */
