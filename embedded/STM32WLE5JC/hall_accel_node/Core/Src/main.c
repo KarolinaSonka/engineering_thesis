@@ -27,7 +27,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdbool.h>
+#include "stm32_lpm.h"
+#include "utilities_def.h"
 extern I2C_HandleTypeDef hi2c2;
+extern volatile bool wake_from_accel;
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,7 +41,8 @@ extern I2C_HandleTypeDef hi2c2;
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define LORIOTA_USE_STOP2 1
+#define LORIOTA_STOP2_DEBUG 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -133,7 +138,20 @@ int main(void)
 
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
 
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
+	#if LORIOTA_STOP2_DEBUG
+	    HAL_DBGMCU_EnableDBGStopMode();
+	#endif
+
+	HAL_Delay(15000);
+
+	#if LORIOTA_USE_STOP2
+	    UTIL_LPM_SetStopMode(
+	        (1UL << CFG_LPM_APP_Id),
+	        UTIL_LPM_ENABLE
+	    );
+	#endif
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -143,10 +161,7 @@ int main(void)
     MX_SubGHz_Phy_Process();
 
     /* USER CODE BEGIN 3 */
-		HAL_PWR_EnterSLEEPMode(
-		        PWR_MAINREGULATOR_ON,
-		        PWR_SLEEPENTRY_WFI
-		    );
+
 	}
   /* USER CODE END 3 */
 }
