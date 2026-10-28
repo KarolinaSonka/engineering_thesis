@@ -27,6 +27,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include "stm32_lpm.h"
+#include "utilities_def.h"
 extern I2C_HandleTypeDef hi2c2;
 /* USER CODE END Includes */
 
@@ -37,7 +39,8 @@ extern I2C_HandleTypeDef hi2c2;
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define LORIOTA_USE_STOP0 1
+#define LORIOTA_STOP0_DEBUG 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -96,8 +99,6 @@ int main(void)
   MX_I2C2_Init();
   MX_ADC_Init();
   /* USER CODE BEGIN 2 */
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
-
 	uint8_t adxl_init_data = 0x08;
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &adxl_init_data, 1, 100);
 
@@ -134,6 +135,19 @@ int main(void)
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &val, 1, 100);
 
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+
+#if LORIOTA_STOP0_DEBUG
+    HAL_DBGMCU_EnableDBGStopMode();
+#endif
+
+HAL_Delay(15000);
+
+#if LORIOTA_USE_STOP0
+    UTIL_LPM_SetStopMode(
+        (1UL << CFG_LPM_APP_Id),
+        UTIL_LPM_ENABLE
+    );
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -143,10 +157,6 @@ int main(void)
     MX_SubGHz_Phy_Process();
 
     /* USER CODE BEGIN 3 */
-    HAL_PWR_EnterSLEEPMode(
-                PWR_MAINREGULATOR_ON,
-                PWR_SLEEPENTRY_WFI
-            );
 	}
   /* USER CODE END 3 */
 }

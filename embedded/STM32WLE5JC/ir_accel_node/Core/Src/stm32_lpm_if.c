@@ -22,7 +22,9 @@
 #include "platform.h"
 #include "stm32_lpm.h"
 #include "stm32_lpm_if.h"
-
+#include "main.h"
+#include "i2c.h"
+#include "adc.h"
 /* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */
@@ -69,7 +71,7 @@ const struct UTIL_LPM_Driver_s UTIL_PowerDriver =
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
-
+extern void SystemClock_Config(void);
 /* USER CODE END PFP */
 
 /* Exported functions --------------------------------------------------------*/
@@ -100,7 +102,7 @@ void PWR_EnterStopMode(void)
   /* USER CODE BEGIN EnterStopMode_2 */
 
   /* USER CODE END EnterStopMode_2 */
-  HAL_PWREx_EnterSTOP2Mode(PWR_STOPENTRY_WFI);
+  HAL_PWREx_EnterSTOP0Mode(PWR_STOPENTRY_WFI);
   /* USER CODE BEGIN EnterStopMode_3 */
 
   /* USER CODE END EnterStopMode_3 */
@@ -142,6 +144,9 @@ void PWR_EnterSleepMode(void)
 void PWR_ExitSleepMode(void)
 {
   /* USER CODE BEGIN ExitSleepMode_1 */
+	SystemClock_Config();
+	MX_I2C2_Init();
+	MX_ADC_Init();
 
   /* USER CODE END ExitSleepMode_1 */
   /* Resume sysTick */
