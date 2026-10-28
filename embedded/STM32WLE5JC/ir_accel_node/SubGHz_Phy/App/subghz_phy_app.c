@@ -15,12 +15,17 @@
 
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include "utilities_def.h"
 #include "stm32_lpm.h"
 #include "stm32_seq.h"
 #include "stm32_timer.h"
 #include <stdio.h>
 #include "lora_frame.h"
+#include "rtc.h"
+#include "main.h"
+#include "i2c.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -50,8 +55,8 @@ extern ADC_HandleTypeDef hadc;
 
 #define STATE_CHANGE_DELAY 1000
 
-#define IR_POLL_INTERVAL_MS 10000U
-#define TX_REPORT_INTERVAL_MS 900000U
+#define IR_POLL_INTERVAL_MS   10000U
+#define REPORT_INTERVAL_POLLS 90U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -64,25 +69,22 @@ extern ADC_HandleTypeDef hadc;
 static RadioEvents_t RadioEvents;
 
 /* USER CODE BEGIN PV */
-static UTIL_TIMER_Object_t txTimer;
-static UTIL_TIMER_Object_t vibrationTimer;
-static UTIL_TIMER_Object_t irPollTimer;
-
 static volatile bool radio_tx_busy = false;
-static volatile bool wake_from_ir = false;
+static volatile bool tx_finished = false;
 
 uint16_t global_msg_counter = 0;
 const uint32_t MY_NODE_ID = 3333;
 
 volatile bool wake_from_accel = false;
+volatile bool wake_from_ir = false;
 volatile bool wake_from_timer = false;
 volatile bool wake_from_vibration_end = false;
-volatile bool is_cooling_down = false;
-volatile bool vibration_active = false;
+
+static bool vibration_active = false;
 
 static uint8_t last_ir_state = 0xFF;
+static uint32_t polls_until_report = REPORT_INTERVAL_POLLS;
 
-static uint32_t state_change_time = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -92,54 +94,51 @@ static uint32_t state_change_time = 0;
 static void OnTxDone(void);
 
 /**
- * @brief Function to be executed on Radio Rx Done event
- * @param  payload ptr of buffer received
- * @param  size buffer size
- * @param  rssi
- * @param  LoraSnr_FskCfo
- */
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
-		int8_t LoraSnr_FskCfo);
+  * @brief Function to be executed on Radio Rx Done event
+  * @param  payload ptr of buffer received
+  * @param  size buffer size
+  * @param  rssi
+  * @param  LoraSnr_FskCfo
+  */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
 
 /**
- * @brief Function executed on Radio Tx Timeout event
- */
+  * @brief Function executed on Radio Tx Timeout event
+  */
 static void OnTxTimeout(void);
 
 /**
- * @brief Function executed on Radio Rx Timeout event
- */
+  * @brief Function executed on Radio Rx Timeout event
+  */
 static void OnRxTimeout(void);
 
 /**
- * @brief Function executed on Radio Rx Error event
- */
+  * @brief Function executed on Radio Rx Error event
+  */
 static void OnRxError(void);
 
 /* USER CODE BEGIN PFP */
-static void TxTimerCallback(void *context);
-static void VibrationTimerCallback(void *context);
 static void TxProcess(void);
 extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
-static void IrPollTimerCallback(void *context);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
-void SubghzApp_Init(void) {
-	/* USER CODE BEGIN SubghzApp_Init_1 */
+void SubghzApp_Init(void)
+{
+  /* USER CODE BEGIN SubghzApp_Init_1 */
 
-	/* USER CODE END SubghzApp_Init_1 */
+  /* USER CODE END SubghzApp_Init_1 */
 
-	/* Radio initialization */
-	RadioEvents.TxDone = OnTxDone;
-	RadioEvents.RxDone = OnRxDone;
-	RadioEvents.TxTimeout = OnTxTimeout;
-	RadioEvents.RxTimeout = OnRxTimeout;
-	RadioEvents.RxError = OnRxError;
+  /* Radio initialization */
+  RadioEvents.TxDone = OnTxDone;
+  RadioEvents.RxDone = OnRxDone;
+  RadioEvents.TxTimeout = OnTxTimeout;
+  RadioEvents.RxTimeout = OnRxTimeout;
+  RadioEvents.RxError = OnRxError;
 
-	Radio.Init(&RadioEvents);
+  Radio.Init(&RadioEvents);
 
-	/* USER CODE BEGIN SubghzApp_Init_2 */
+  /* USER CODE BEGIN SubghzApp_Init_2 */
 
 	Radio.SetChannel(RF_FREQUENCY);
 	Radio.SetTxConfig(MODEM_LORA,
@@ -159,29 +158,57 @@ void SubghzApp_Init(void) {
 
 	UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
 
-	// 15-minute report timer
-	UTIL_TIMER_Create(&txTimer,
-	TX_REPORT_INTERVAL_MS, UTIL_TIMER_ONESHOT, TxTimerCallback,
-	NULL);
+	if (!loriota_was_standby
+			|| HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_BKP_APP_MAGIC)
+					!= LORIOTA_IR_MAGIC) {
 
-	// vibration alarm timeout
-	UTIL_TIMER_Create(&vibrationTimer, 10000, UTIL_TIMER_ONESHOT,
-			VibrationTimerCallback,
-			NULL);
+		last_ir_state = 0xFF;
+		polls_until_report = REPORT_INTERVAL_POLLS;
+		global_msg_counter = 0;
+		vibration_active = false;
 
-	// periodic IR sensor polling
-	UTIL_TIMER_Create(&irPollTimer,
-	IR_POLL_INTERVAL_MS, UTIL_TIMER_PERIODIC, IrPollTimerCallback,
-	NULL);
+		wake_from_timer = true;
 
-	UTIL_TIMER_Start(&txTimer);
-	UTIL_TIMER_Start(&irPollTimer);
+	} else {
 
-	wake_from_timer = true;
+		uint32_t saved_ir = HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_BKP_IR_STATE);
+
+		last_ir_state = (saved_ir <= 1U) ? (uint8_t) saved_ir : 0xFF;
+
+		polls_until_report = HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_BKP_POLLS);
+
+		if (polls_until_report > REPORT_INTERVAL_POLLS) {
+			polls_until_report = REPORT_INTERVAL_POLLS;
+		}
+
+		global_msg_counter = (uint16_t) HAL_RTCEx_BKUPRead(&hrtc,
+				LORIOTA_BKP_COUNTER);
+
+		vibration_active = (HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_BKP_VIBRATION)
+				== 1U);
+
+		wake_from_ir = true;
+
+		if (loriota_woke_from_rtc) {
+
+			if (polls_until_report > 0U) {
+				polls_until_report--;
+			}
+
+			if (polls_until_report == 0U) {
+				wake_from_timer = true;
+			}
+
+			if (vibration_active) {
+				wake_from_vibration_end = true;
+			}
+		}
+	}
+
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 
 	Radio.Sleep();
-	/* USER CODE END SubghzApp_Init_2 */
+  /* USER CODE END SubghzApp_Init_2 */
 }
 
 /* USER CODE BEGIN EF */
@@ -189,56 +216,49 @@ void SubghzApp_Init(void) {
 /* USER CODE END EF */
 
 /* Private functions ---------------------------------------------------------*/
-static void OnTxDone(void) {
-	/* USER CODE BEGIN OnTxDone */
+static void OnTxDone(void)
+{
+  /* USER CODE BEGIN OnTxDone */
 	Radio.Sleep();
 
 	radio_tx_busy = false;
+	tx_finished = true;
 
-	UTIL_TIMER_Stop(&txTimer);
-	UTIL_TIMER_Start(&txTimer);
-
-	wake_from_timer = false;
-
-	if (wake_from_accel || wake_from_ir || wake_from_vibration_end) {
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	}
-	/* USER CODE END OnTxDone */
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+  /* USER CODE END OnTxDone */
 }
 
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
-		int8_t LoraSnr_FskCfo) {
-	/* USER CODE BEGIN OnRxDone */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
+{
+  /* USER CODE BEGIN OnRxDone */
 	Radio.Sleep();
-	/* USER CODE END OnRxDone */
+  /* USER CODE END OnRxDone */
 }
 
-static void OnTxTimeout(void) {
-	/* USER CODE BEGIN OnTxTimeout */
+static void OnTxTimeout(void)
+{
+  /* USER CODE BEGIN OnTxTimeout */
 	Radio.Sleep();
 
 	radio_tx_busy = false;
+	tx_finished = true;
 
-	UTIL_TIMER_Stop(&txTimer);
-	UTIL_TIMER_Start(&txTimer);
-
-	if (wake_from_accel || wake_from_ir || wake_from_timer
-			|| wake_from_vibration_end) {
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	}
-	/* USER CODE END OnTxTimeout */
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+  /* USER CODE END OnTxTimeout */
 }
 
-static void OnRxTimeout(void) {
-	/* USER CODE BEGIN OnRxTimeout */
+static void OnRxTimeout(void)
+{
+  /* USER CODE BEGIN OnRxTimeout */
 	Radio.Sleep();
-	/* USER CODE END OnRxTimeout */
+  /* USER CODE END OnRxTimeout */
 }
 
-static void OnRxError(void) {
-	/* USER CODE BEGIN OnRxError */
+static void OnRxError(void)
+{
+  /* USER CODE BEGIN OnRxError */
 	Radio.Sleep();
-	/* USER CODE END OnRxError */
+  /* USER CODE END OnRxError */
 }
 
 /* USER CODE BEGIN PrFD */
@@ -302,12 +322,7 @@ void Master_Radio_Send(void) {
 
 	if (ir_changed) {
 		should_send = true;
-
 		vibration_active = false;
-
-		UTIL_TIMER_Stop(&vibrationTimer);
-
-		state_change_time = HAL_GetTick();
 	}
 
 	if (is_vib_end) {
@@ -320,22 +335,12 @@ void Master_Radio_Send(void) {
 
 	if (!is_door_closed && vibration_active) {
 		vibration_active = false;
-
-		UTIL_TIMER_Stop(&vibrationTimer);
 	}
 
-	if (is_accel && is_door_closed && !ir_changed) {
-		if (HAL_GetTick() - state_change_time >=
-		STATE_CHANGE_DELAY) {
-			if (!vibration_active) {
-				should_send = true;
-			}
+	if (is_accel && is_door_closed && !ir_changed && !vibration_active) {
 
-			vibration_active = true;
-
-			UTIL_TIMER_Stop(&vibrationTimer);
-			UTIL_TIMER_Start(&vibrationTimer);
-		}
+		vibration_active = true;
+		should_send = true;
 	}
 
 	int16_t acc_x = 0;
@@ -407,32 +412,118 @@ void Master_Radio_Send(void) {
 	Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 }
 
-static void VibrationTimerCallback(void *context) {
-	wake_from_vibration_end = true;
-	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+static void Loriota_SaveBackupState(void) {
+	HAL_PWR_EnableBkUpAccess();
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_BKP_APP_MAGIC, LORIOTA_IR_MAGIC);
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_BKP_VIBRATION,
+			vibration_active ? 1U : 0U);
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_BKP_COUNTER, global_msg_counter);
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_BKP_POLLS, polls_until_report);
+
+	HAL_RTCEx_BKUPWrite(&hrtc, LORIOTA_BKP_IR_STATE, last_ir_state);
 }
 
-static void TxTimerCallback(void *context) {
-	wake_from_timer = true;
-	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+static void Loriota_EnterStandby(void) {
+	TCRT5000_Off();
+
+	Radio.Sleep();
+
+	HAL_GPIO_WritePin(
+	GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+
+	if (HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A) != HAL_OK) {
+		Error_Handler();
+	}
+
+	if (HAL_RTCEx_DeactivateWakeUpTimer(&hrtc) != HAL_OK) {
+		Error_Handler();
+	}
+
+	uint32_t bcdu = (RTC->ICSR & RTC_ICSR_BCDU) >> RTC_ICSR_BCDU_Pos;
+
+	uint32_t divider = (hrtc.Init.AsynchPrediv + 1UL) * (1UL << (8UL + bcdu));
+
+	uint32_t ticks = (uint32_t) (((uint64_t) 10UL * LSI_VALUE + divider / 2UL)
+			/ divider);
+
+	if (ticks == 0UL || ticks > 65536UL) {
+		Error_Handler();
+	}
+
+	if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, ticks - 1UL,
+	RTC_WAKEUPCLOCK_CK_SPRE_16BITS, 0UL) != HAL_OK) {
+		Error_Handler();
+	}
+
+	HAL_PWR_DisableWakeUpPin(PWR_WAKEUP_PIN1);
+	HAL_PWR_DisableWakeUpPin(PWR_WAKEUP_PIN2);
+	HAL_PWR_DisableWakeUpPin(PWR_WAKEUP_PIN3);
+
+	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+
+	uint8_t int_source = 0;
+
+	HAL_I2C_Mem_Read(&hi2c2, 0xA6, 0x30,
+	I2C_MEMADD_SIZE_8BIT, &int_source, 1, 100);
+
+	if (last_ir_state == (uint8_t) GPIO_PIN_RESET && !vibration_active
+			&& HAL_GPIO_ReadPin(ADXL_INT1_GPIO_Port, ADXL_INT1_Pin)
+					== GPIO_PIN_RESET) {
+
+		HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1_HIGH);
+	}
+
+	CLEAR_BIT(PWR->CR3, PWR_CR3_EWRFBUSY | PWR_CR3_EWRFIRQ);
+
+	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WRFBUSY);
+
+	HAL_NVIC_DisableIRQ(SUBGHZ_Radio_IRQn);
+	HAL_NVIC_ClearPendingIRQ(SUBGHZ_Radio_IRQn);
+
+	if (HAL_PWREx_EnableGPIOPullDown(
+	PWR_GPIO_B, PWR_GPIO_BIT_3) != HAL_OK) {
+		Error_Handler();
+	}
+
+	HAL_PWREx_EnablePullUpPullDownConfig();
+
+	HAL_NVIC_DisableIRQ(TIM17_IRQn);
+	HAL_NVIC_ClearPendingIRQ(TIM17_IRQn);
+
+	SysTick->CTRL &= ~SysTick_CTRL_TICKINT_Msk;
+
+	__DSB();
+	__ISB();
+
+	HAL_PWR_EnterSTANDBYMode();
+
+	Error_Handler();
 }
 
 static void TxProcess(void) {
-	Master_Radio_Send();
-}
+	if (tx_finished) {
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	if (GPIO_Pin == ADXL_INT1_Pin) {
-		wake_from_accel = true;
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+		tx_finished = false;
+
+		polls_until_report = REPORT_INTERVAL_POLLS;
+
+		Loriota_SaveBackupState();
+		Loriota_EnterStandby();
+
+		return;
+	}
+
+	Master_Radio_Send();
+
+	Loriota_SaveBackupState();
+
+	if (!radio_tx_busy && !tx_finished) {
+		Loriota_EnterStandby();
 	}
 }
 
-static void IrPollTimerCallback(void *context) {
-	(void) context;
-
-	wake_from_ir = true;
-
-	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-}
 /* USER CODE END PrFD */

@@ -31,7 +31,7 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -41,7 +41,20 @@ extern "C" {
 
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
+extern bool loriota_was_standby;
+extern bool loriota_rtc_preserved;
+extern bool loriota_woke_from_rtc;
+extern bool loriota_woke_from_accel;
 
+#define LORIOTA_RTC_MAGIC 0x52544349UL
+#define LORIOTA_IR_MAGIC  0x49525333UL
+
+#define LORIOTA_BKP_APP_MAGIC  RTC_BKP_DR13
+#define LORIOTA_BKP_VIBRATION  RTC_BKP_DR14
+#define LORIOTA_BKP_COUNTER    RTC_BKP_DR15
+#define LORIOTA_BKP_RTC_MAGIC  RTC_BKP_DR17
+#define LORIOTA_BKP_POLLS      RTC_BKP_DR18
+#define LORIOTA_BKP_IR_STATE   RTC_BKP_DR19
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/
@@ -61,10 +74,8 @@ void Error_Handler(void);
 #define LED_GPIO_Port GPIOB
 #define ADXL_INT1_Pin GPIO_PIN_0
 #define ADXL_INT1_GPIO_Port GPIOA
-#define ADXL_INT1_EXTI_IRQn EXTI0_IRQn
 #define IR_Pin GPIO_PIN_9
 #define IR_GPIO_Port GPIOA
-#define IR_EXTI_IRQn EXTI9_5_IRQn
 #define RF_CTRL1_Pin GPIO_PIN_4
 #define RF_CTRL1_GPIO_Port GPIOA
 #define RF_CTRL2_Pin GPIO_PIN_5
