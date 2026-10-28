@@ -94,27 +94,28 @@ static uint32_t polls_until_report = REPORT_INTERVAL_POLLS;
 static void OnTxDone(void);
 
 /**
-  * @brief Function to be executed on Radio Rx Done event
-  * @param  payload ptr of buffer received
-  * @param  size buffer size
-  * @param  rssi
-  * @param  LoraSnr_FskCfo
-  */
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
+ * @brief Function to be executed on Radio Rx Done event
+ * @param  payload ptr of buffer received
+ * @param  size buffer size
+ * @param  rssi
+ * @param  LoraSnr_FskCfo
+ */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
+		int8_t LoraSnr_FskCfo);
 
 /**
-  * @brief Function executed on Radio Tx Timeout event
-  */
+ * @brief Function executed on Radio Tx Timeout event
+ */
 static void OnTxTimeout(void);
 
 /**
-  * @brief Function executed on Radio Rx Timeout event
-  */
+ * @brief Function executed on Radio Rx Timeout event
+ */
 static void OnRxTimeout(void);
 
 /**
-  * @brief Function executed on Radio Rx Error event
-  */
+ * @brief Function executed on Radio Rx Error event
+ */
 static void OnRxError(void);
 
 /* USER CODE BEGIN PFP */
@@ -123,22 +124,21 @@ extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
-void SubghzApp_Init(void)
-{
-  /* USER CODE BEGIN SubghzApp_Init_1 */
+void SubghzApp_Init(void) {
+	/* USER CODE BEGIN SubghzApp_Init_1 */
 
-  /* USER CODE END SubghzApp_Init_1 */
+	/* USER CODE END SubghzApp_Init_1 */
 
-  /* Radio initialization */
-  RadioEvents.TxDone = OnTxDone;
-  RadioEvents.RxDone = OnRxDone;
-  RadioEvents.TxTimeout = OnTxTimeout;
-  RadioEvents.RxTimeout = OnRxTimeout;
-  RadioEvents.RxError = OnRxError;
+	/* Radio initialization */
+	RadioEvents.TxDone = OnTxDone;
+	RadioEvents.RxDone = OnRxDone;
+	RadioEvents.TxTimeout = OnTxTimeout;
+	RadioEvents.RxTimeout = OnRxTimeout;
+	RadioEvents.RxError = OnRxError;
 
-  Radio.Init(&RadioEvents);
+	Radio.Init(&RadioEvents);
 
-  /* USER CODE BEGIN SubghzApp_Init_2 */
+	/* USER CODE BEGIN SubghzApp_Init_2 */
 
 	Radio.SetChannel(RF_FREQUENCY);
 	Radio.SetTxConfig(MODEM_LORA,
@@ -180,7 +180,7 @@ void SubghzApp_Init(void)
 		}
 
 		global_msg_counter = (uint16_t) HAL_RTCEx_BKUPRead(&hrtc,
-				LORIOTA_BKP_COUNTER);
+		LORIOTA_BKP_COUNTER);
 
 		vibration_active = (HAL_RTCEx_BKUPRead(&hrtc, LORIOTA_BKP_VIBRATION)
 				== 1U);
@@ -206,7 +206,7 @@ void SubghzApp_Init(void)
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 
 	Radio.Sleep();
-  /* USER CODE END SubghzApp_Init_2 */
+	/* USER CODE END SubghzApp_Init_2 */
 }
 
 /* USER CODE BEGIN EF */
@@ -214,49 +214,45 @@ void SubghzApp_Init(void)
 /* USER CODE END EF */
 
 /* Private functions ---------------------------------------------------------*/
-static void OnTxDone(void)
-{
-  /* USER CODE BEGIN OnTxDone */
+static void OnTxDone(void) {
+	/* USER CODE BEGIN OnTxDone */
 	Radio.Sleep();
 
 	radio_tx_busy = false;
 	tx_finished = true;
 
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-  /* USER CODE END OnTxDone */
+	/* USER CODE END OnTxDone */
 }
 
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
-{
-  /* USER CODE BEGIN OnRxDone */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
+		int8_t LoraSnr_FskCfo) {
+	/* USER CODE BEGIN OnRxDone */
 	Radio.Sleep();
-  /* USER CODE END OnRxDone */
+	/* USER CODE END OnRxDone */
 }
 
-static void OnTxTimeout(void)
-{
-  /* USER CODE BEGIN OnTxTimeout */
+static void OnTxTimeout(void) {
+	/* USER CODE BEGIN OnTxTimeout */
 	Radio.Sleep();
 
 	radio_tx_busy = false;
 	tx_finished = true;
 
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-  /* USER CODE END OnTxTimeout */
+	/* USER CODE END OnTxTimeout */
 }
 
-static void OnRxTimeout(void)
-{
-  /* USER CODE BEGIN OnRxTimeout */
+static void OnRxTimeout(void) {
+	/* USER CODE BEGIN OnRxTimeout */
 	Radio.Sleep();
-  /* USER CODE END OnRxTimeout */
+	/* USER CODE END OnRxTimeout */
 }
 
-static void OnRxError(void)
-{
-  /* USER CODE BEGIN OnRxError */
+static void OnRxError(void) {
+	/* USER CODE BEGIN OnRxError */
 	Radio.Sleep();
-  /* USER CODE END OnRxError */
+	/* USER CODE END OnRxError */
 }
 
 /* USER CODE BEGIN PrFD */
@@ -446,12 +442,11 @@ static void Loriota_EnterShutdown(void) {
 	uint32_t divider = (hrtc.Init.AsynchPrediv + 1UL) * (1UL << (8UL + bcdu));
 
 	if (__HAL_RCC_GET_RTC_SOURCE() != RCC_RTCCLKSOURCE_LSE) {
-	    Error_Handler();
+		Error_Handler();
 	}
 
-	uint32_t ticks =
-	    (uint32_t)(((uint64_t)10UL * LSE_VALUE +
-	                divider / 2UL) / divider);
+	uint32_t ticks = (uint32_t) (((uint64_t) 10UL * LSE_VALUE + divider / 2UL)
+			/ divider);
 
 	if (ticks == 0UL || ticks > 65536UL) {
 		Error_Handler();
