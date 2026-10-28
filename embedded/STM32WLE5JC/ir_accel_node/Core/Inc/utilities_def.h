@@ -43,7 +43,7 @@ extern "C" {
 typedef enum
 {
   /* USER CODE BEGIN CFG_LPM_Id_t_0 */
-
+  CFG_LPM_RADIO_TX_Id,
   /* USER CODE END CFG_LPM_Id_t_0 */
   CFG_LPM_DUMMY_Id,
   /* USER CODE BEGIN CFG_LPM_Id_t */

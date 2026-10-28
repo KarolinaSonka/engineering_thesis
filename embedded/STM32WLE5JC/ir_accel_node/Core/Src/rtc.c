@@ -21,7 +21,7 @@
 #include "rtc.h"
 
 /* USER CODE BEGIN 0 */
-
+#include "main.h"
 /* USER CODE END 0 */
 
 RTC_HandleTypeDef hrtc;
@@ -31,7 +31,17 @@ void MX_RTC_Init(void)
 {
 
   /* USER CODE BEGIN RTC_Init 0 */
+	if (loriota_rtc_preserved) {
 
+	    hrtc.Instance = RTC;
+
+	    HAL_RTC_MspInit(&hrtc);
+
+	    hrtc.Init.AsynchPrediv = 31;
+	    hrtc.Init.BinMode = RTC_BINARY_ONLY;
+
+	    return;
+	}
   /* USER CODE END RTC_Init 0 */
 
   RTC_AlarmTypeDef sAlarm = {0};
@@ -89,7 +99,7 @@ void HAL_RTC_MspInit(RTC_HandleTypeDef* rtcHandle)
   /** Initializes the peripherals clocks
   */
     PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_RTC;
-    PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
+    PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
 
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
     {
@@ -101,7 +111,6 @@ void HAL_RTC_MspInit(RTC_HandleTypeDef* rtcHandle)
     __HAL_RCC_RTCAPB_CLK_ENABLE();
   /* USER CODE BEGIN RTC_MspInit 1 */
     HAL_NVIC_SetPriority(RTC_Alarm_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
   /* USER CODE END RTC_MspInit 1 */
   }
 }

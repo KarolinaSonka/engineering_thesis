@@ -202,34 +202,6 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
-  * @brief This function handles EXTI Line 0 Interrupt.
-  */
-void EXTI0_IRQHandler(void)
-{
-  /* USER CODE BEGIN EXTI0_IRQn 0 */
-
-  /* USER CODE END EXTI0_IRQn 0 */
-  HAL_GPIO_EXTI_IRQHandler(ADXL_INT1_Pin);
-  /* USER CODE BEGIN EXTI0_IRQn 1 */
-
-  /* USER CODE END EXTI0_IRQn 1 */
-}
-
-/**
-  * @brief This function handles EXTI Lines [9:5] Interrupt.
-  */
-void EXTI9_5_IRQHandler(void)
-{
-  /* USER CODE BEGIN EXTI9_5_IRQn 0 */
-
-  /* USER CODE END EXTI9_5_IRQn 0 */
-  HAL_GPIO_EXTI_IRQHandler(IR_Pin);
-  /* USER CODE BEGIN EXTI9_5_IRQn 1 */
-
-  /* USER CODE END EXTI9_5_IRQn 1 */
-}
-
-/**
   * @brief This function handles TIM17 Global Interrupt.
   */
 void TIM17_IRQHandler(void)
@@ -261,5 +233,10 @@ void SUBGHZ_Radio_IRQHandler(void)
 void RTC_Alarm_IRQHandler(void)
 {
     HAL_RTC_AlarmIRQHandler(&hrtc);
+}
+
+void RTC_WKUP_IRQHandler(void)
+{
+    HAL_RTCEx_WakeUpTimerIRQHandler(&hrtc);
 }
 /* USER CODE END 1 */
