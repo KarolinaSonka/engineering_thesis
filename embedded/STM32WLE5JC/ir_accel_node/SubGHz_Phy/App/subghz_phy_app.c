@@ -257,7 +257,7 @@ static void TCRT5000_Off(void) {
 static GPIO_PinState TCRT5000_Read(void) {
 	TCRT5000_On();
 
-	HAL_Delay(3000);
+	HAL_Delay(20);
 
 	GPIO_PinState state = HAL_GPIO_ReadPin(IR_GPIO_Port, IR_Pin);
 
