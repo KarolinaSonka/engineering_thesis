@@ -68,6 +68,7 @@ static UTIL_TIMER_Object_t vibrationTimer;
 static UTIL_TIMER_Object_t hallPollTimer;
 
 static volatile bool radio_tx_busy = false;
+static volatile bool enter_lprun_requested = false;
 
 uint16_t global_msg_counter = 0;
 const uint32_t MY_NODE_ID = 2222;
@@ -120,6 +121,9 @@ static void VibrationTimerCallback(void *context);
 static void TxProcess(void);
 extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
 static void HallPollTimerCallback(void *context);
+
+extern void Loriota_EnterLowPowerRun(void);
+extern void Loriota_ExitLowPowerRun(void);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -157,17 +161,14 @@ void SubghzApp_Init(void) {
 
 	UTIL_SEQ_RegTask(TASK_TX, 0, TxProcess);
 
-	// 15 minutes from the last completed transmission
 	UTIL_TIMER_Create(&txTimer,
 	TX_REPORT_INTERVAL_MS, UTIL_TIMER_ONESHOT, TxTimerCallback,
 	NULL);
 
-	// end vibration alarm after 10 seconds
 	UTIL_TIMER_Create(&vibrationTimer, 10000, UTIL_TIMER_ONESHOT,
 			VibrationTimerCallback,
 			NULL);
 
-	// periodic Hall sensor measurement
 	UTIL_TIMER_Create(&hallPollTimer,
 	HALL_POLL_INTERVAL_MS, UTIL_TIMER_PERIODIC, HallPollTimerCallback,
 	NULL);
@@ -177,7 +178,6 @@ void SubghzApp_Init(void) {
 	wake_from_timer = true;
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 
-	// Keep radio asleep until transmission
 	Radio.Sleep();
 	/* USER CODE END SubghzApp_Init_2 */
 }
@@ -197,10 +197,8 @@ static void OnTxDone(void) {
 	UTIL_TIMER_Stop(&txTimer);
 	UTIL_TIMER_Start(&txTimer);
 
-	if (wake_from_accel || wake_from_hall || wake_from_timer
-			|| wake_from_vibration_end) {
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	}
+	enter_lprun_requested = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	/* USER CODE END OnTxDone */
 }
 
@@ -220,10 +218,8 @@ static void OnTxTimeout(void) {
 	UTIL_TIMER_Stop(&txTimer);
 	UTIL_TIMER_Start(&txTimer);
 
-	if (wake_from_accel || wake_from_hall || wake_from_timer
-			|| wake_from_vibration_end) {
-		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	}
+	enter_lprun_requested = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	/* USER CODE END OnTxTimeout */
 }
 
@@ -413,7 +409,25 @@ static void TxTimerCallback(void *context) {
 }
 
 static void TxProcess(void) {
+	bool has_event = wake_from_accel || wake_from_hall || wake_from_timer
+			|| wake_from_vibration_end;
+
+	if (enter_lprun_requested && !has_event) {
+		enter_lprun_requested = false;
+
+		Loriota_EnterLowPowerRun();
+		return;
+	}
+
+	enter_lprun_requested = false;
+
+	Loriota_ExitLowPowerRun();
+
 	Master_Radio_Send();
+
+	if (!radio_tx_busy) {
+		Loriota_EnterLowPowerRun();
+	}
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
