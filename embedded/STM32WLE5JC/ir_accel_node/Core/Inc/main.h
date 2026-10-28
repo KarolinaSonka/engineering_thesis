@@ -64,7 +64,6 @@ void Error_Handler(void);
 #define ADXL_INT1_EXTI_IRQn EXTI0_IRQn
 #define IR_Pin GPIO_PIN_9
 #define IR_GPIO_Port GPIOA
-#define IR_EXTI_IRQn EXTI9_5_IRQn
 #define RF_CTRL1_Pin GPIO_PIN_4
 #define RF_CTRL1_GPIO_Port GPIOA
 #define RF_CTRL2_Pin GPIO_PIN_5

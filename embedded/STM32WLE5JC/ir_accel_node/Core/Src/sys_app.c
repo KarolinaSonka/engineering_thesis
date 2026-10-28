@@ -43,7 +43,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#undef CFG_LPM_SUPPORTED
+#define CFG_LPM_SUPPORTED 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -74,7 +75,12 @@ void SystemApp_Init(void)
 
 	UTIL_LPM_Init();
 
-	UTIL_LPM_SetOffMode((1 << CFG_LPM_APP_Id),UTIL_LPM_DISABLE);
+	UTIL_LPM_SetOffMode((1 << CFG_LPM_APP_Id), UTIL_LPM_DISABLE);
+
+	UTIL_LPM_SetStopMode(
+	    (1UL << CFG_LPM_APP_Id),
+	    UTIL_LPM_DISABLE
+	);
   /* USER CODE END SystemApp_Init_1 */
 
 }
