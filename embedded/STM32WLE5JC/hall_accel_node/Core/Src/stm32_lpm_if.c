@@ -1,21 +1,21 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    stm32_lpm_if.c
-  * @author  MCD Application Team
-  * @brief   Low layer function to enter/exit low power modes (stop, sleep)
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    stm32_lpm_if.c
+ * @author  MCD Application Team
+ * @brief   Low layer function to enter/exit low power modes (stop, sleep)
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -34,19 +34,14 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /**
-  * @brief Power driver callbacks handler
-  */
-const struct UTIL_LPM_Driver_s UTIL_PowerDriver =
-{
-  PWR_EnterSleepMode,
-  PWR_ExitSleepMode,
+ * @brief Power driver callbacks handler
+ */
+const struct UTIL_LPM_Driver_s UTIL_PowerDriver = { PWR_EnterSleepMode,
+		PWR_ExitSleepMode,
 
-  PWR_EnterStopMode,
-  PWR_ExitStopMode,
+		PWR_EnterStopMode, PWR_ExitStopMode,
 
-  PWR_EnterOffMode,
-  PWR_ExitOffMode,
-};
+		PWR_EnterOffMode, PWR_ExitOffMode, };
 
 /* USER CODE BEGIN PTD */
 
@@ -74,82 +69,84 @@ const struct UTIL_LPM_Driver_s UTIL_PowerDriver =
 
 /* Exported functions --------------------------------------------------------*/
 
-void PWR_EnterOffMode(void)
-{
-  /* USER CODE BEGIN EnterOffMode_1 */
+void PWR_EnterOffMode(void) {
+	/* USER CODE BEGIN EnterOffMode_1 */
 
-  /* USER CODE END EnterOffMode_1 */
+	/* USER CODE END EnterOffMode_1 */
 }
 
-void PWR_ExitOffMode(void)
-{
-  /* USER CODE BEGIN ExitOffMode_1 */
+void PWR_ExitOffMode(void) {
+	/* USER CODE BEGIN ExitOffMode_1 */
 
-  /* USER CODE END ExitOffMode_1 */
+	/* USER CODE END ExitOffMode_1 */
 }
 
-void PWR_EnterStopMode(void)
-{
-  /* USER CODE BEGIN EnterStopMode_1 */
+void PWR_EnterStopMode(void) {
+	/* USER CODE BEGIN EnterStopMode_1 */
 
-  /* USER CODE END EnterStopMode_1 */
-  HAL_SuspendTick();
-  /* Clear Status Flag before entering STOP/STANDBY Mode */
-  LL_PWR_ClearFlag_C1STOP_C1STB();
+	/* USER CODE END EnterStopMode_1 */
+	HAL_SuspendTick();
+	/* Clear Status Flag before entering STOP/STANDBY Mode */
+	LL_PWR_ClearFlag_C1STOP_C1STB();
 
-  /* USER CODE BEGIN EnterStopMode_2 */
+	/* USER CODE BEGIN EnterStopMode_2 */
 
-  /* USER CODE END EnterStopMode_2 */
-  HAL_PWREx_EnterSTOP2Mode(PWR_STOPENTRY_WFI);
-  /* USER CODE BEGIN EnterStopMode_3 */
+	/* USER CODE END EnterStopMode_2 */
+	HAL_PWREx_EnterSTOP2Mode(PWR_STOPENTRY_WFI);
+	/* USER CODE BEGIN EnterStopMode_3 */
 
-  /* USER CODE END EnterStopMode_3 */
+	/* USER CODE END EnterStopMode_3 */
 }
 
-void PWR_ExitStopMode(void)
-{
-  /* USER CODE BEGIN ExitStopMode_1 */
+void PWR_ExitStopMode(void) {
+	/* USER CODE BEGIN ExitStopMode_1 */
 
-  /* USER CODE END ExitStopMode_1 */
-  /* Resume sysTick : work around for debugger problem in dual core */
-  HAL_ResumeTick();
-  /*Not retained periph:
-    ADC interface
-    DAC interface USARTx, TIMx, i2Cx, SPIx
-    SRAM ctrls, DMAx, DMAMux, AES, RNG, HSEM  */
+	/* USER CODE END ExitStopMode_1 */
+	/* Resume sysTick : work around for debugger problem in dual core */
+	HAL_ResumeTick();
+	/*Not retained periph:
+	 ADC interface
+	 DAC interface USARTx, TIMx, i2Cx, SPIx
+	 SRAM ctrls, DMAx, DMAMux, AES, RNG, HSEM  */
 
-  /* USER CODE BEGIN ExitStopMode_2 */
+	/* USER CODE BEGIN ExitStopMode_2 */
 
-  /* USER CODE END ExitStopMode_2 */
+	/* USER CODE END ExitStopMode_2 */
 }
 
-void PWR_EnterSleepMode(void)
-{
-  /* USER CODE BEGIN EnterSleepMode_1 */
+void PWR_EnterSleepMode(void) {
+	/* USER CODE BEGIN EnterSleepMode_1 */
 
-  /* USER CODE END EnterSleepMode_1 */
-  /* Suspend sysTick */
-  HAL_SuspendTick();
-  /* USER CODE BEGIN EnterSleepMode_2 */
+	/* USER CODE END EnterSleepMode_1 */
+	/* Suspend sysTick */
+	HAL_SuspendTick();
+	/* USER CODE BEGIN EnterSleepMode_2 */
 
-  /* USER CODE END EnterSleepMode_2 */
-  HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
-  /* USER CODE BEGIN EnterSleepMode_3 */
+	/* USER CODE END EnterSleepMode_2 */
+	if (READ_BIT(PWR->CR1, PWR_CR1_LPR) != 0U) {
+		HAL_PWR_EnterSLEEPMode(
+		PWR_LOWPOWERREGULATOR_ON,
+		PWR_SLEEPENTRY_WFI);
+	} else {
+		HAL_PWR_EnterSLEEPMode(
+		PWR_MAINREGULATOR_ON,
+		PWR_SLEEPENTRY_WFI);
+	}
+	/* USER CODE BEGIN EnterSleepMode_3 */
 
-  /* USER CODE END EnterSleepMode_3 */
+	/* USER CODE END EnterSleepMode_3 */
 }
 
-void PWR_ExitSleepMode(void)
-{
-  /* USER CODE BEGIN ExitSleepMode_1 */
+void PWR_ExitSleepMode(void) {
+	/* USER CODE BEGIN ExitSleepMode_1 */
 
-  /* USER CODE END ExitSleepMode_1 */
-  /* Resume sysTick */
-  HAL_ResumeTick();
+	/* USER CODE END ExitSleepMode_1 */
+	/* Resume sysTick */
+	HAL_ResumeTick();
 
-  /* USER CODE BEGIN ExitSleepMode_2 */
+	/* USER CODE BEGIN ExitSleepMode_2 */
 
-  /* USER CODE END ExitSleepMode_2 */
+	/* USER CODE END ExitSleepMode_2 */
 }
 
 /* USER CODE BEGIN EF */
