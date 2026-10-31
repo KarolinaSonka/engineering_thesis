@@ -8,7 +8,7 @@ import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
 import History from './pages/History';
 import Settings from './pages/Settings';
-import Login from './pages/Login'; 
+import Login from './pages/Login';
 
 const App = () => {
   const [user, setUser] = useState(null);
@@ -23,11 +23,11 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
- useEffect(() => {
+  useEffect(() => {
     const unsubscribe = onMessage(messaging, (payload) => {
-      new Notification(payload.notification.title, { 
-        body: payload.notification.body, 
-        icon: '/pwa-192x192.png' 
+      new Notification(payload.notification.title, {
+        body: payload.notification.body,
+        icon: '/pwa-192x192.png'
       });
     });
     return () => unsubscribe();
@@ -66,7 +66,7 @@ const App = () => {
         </div>
 
         <Navigation />
-        
+
       </div>
     </Router>
   );

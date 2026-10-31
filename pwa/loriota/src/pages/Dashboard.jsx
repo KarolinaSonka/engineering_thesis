@@ -1,82 +1,161 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db, auth } from '../firebaseConfig';
+import React, { useState, useEffect } from 'react';
+import { rtdb, auth } from '../firebaseConfig';
+import { ref, onValue } from 'firebase/database';
 import { signOut } from 'firebase/auth';
-import { 
+import {
   DoorOpen, DoorClosed, Mailbox, Battery, BatteryWarning,
   Wifi, Activity, CheckCircle2, AlertOctagon,
   Bell, Shield, ShieldAlert, Layers, Unlock, Lock,
   Layout, LayoutTemplate, Settings as SettingsIcon,
-  WifiOff, LogOut 
+  WifiOff, LogOut
 } from 'lucide-react';
 
 const Dashboard = () => {
   const [status, setStatus] = useState('connecting');
   const [time, setTime] = useState(new Date());
-  
-  const [nodes, setNodes] = useState({});
-  const [location, setLocation] = useState('all'); 
 
-  const previousStates = useRef({});
+  const [nodes, setNodes] = useState({});
+  const [location, setLocation] = useState('all');
 
   useEffect(() => {
-    const interval = setInterval(() => setTime(new Date()), 1000);
-    const timeout = setTimeout(() => setStatus('connected'), 2000);
+    const clockInterval = setInterval(() => {
+      setTime(new Date());
+    }, 1000);
 
-    const unsub = onSnapshot(collection(db, "sensors"), (snapshot) => {
-      const live_nodes = {};
-      
-      snapshot.forEach((doc_snap) => {
-        const data = doc_snap.data();
-        const node_id = doc_snap.id; 
-        
-        let formatted_time = "Brak danych";
-        let raw_date = null; 
+    const unsubscribeConnection = onValue(
+      ref(rtdb, ".info/connected"),
 
-        if (data.timestamp) {
-          try {
-            const date_obj = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
-            raw_date = date_obj;
-            formatted_time = date_obj.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          } catch(e) {
-            formatted_time = "Błąd czasu";
+      (snapshot) => {
+        const connected = snapshot.val() === true;
+
+        setStatus(
+          connected ? "connected" : "connecting"
+        );
+      },
+
+      (error) => {
+        console.error(
+          "[RTDB] Connection monitoring failed:",
+          error
+        );
+
+        setStatus("connecting");
+      }
+    );
+
+    const unsubscribeSensors = onValue(
+      ref(rtdb, "sensors"),
+
+      (snapshot) => {
+        const realtimeNodes = snapshot.val() || {};
+        const updatedNodes = {};
+
+        Object.entries(realtimeNodes).forEach(
+          ([nodeId, nodeData]) => {
+            const live = nodeData?.live || {};
+            const settings = nodeData?.settings || {};
+
+            let rawDate = null;
+            let formattedTime = "Brak danych";
+
+            if (live.timestamp) {
+              const parsedDate = new Date(
+                live.timestamp
+              );
+
+              if (!Number.isNaN(parsedDate.getTime())) {
+                rawDate = parsedDate;
+
+                formattedTime = parsedDate.toLocaleTimeString(
+                  "pl-PL",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit"
+                  }
+                );
+              }
+            }
+
+            const customName =
+              typeof settings.custom_name === "string"
+                ? settings.custom_name.trim()
+                : "";
+
+            updatedNodes[nodeId] = {
+              ...live,
+
+              id: nodeId,
+
+              name:
+                customName || `Czujnik #${nodeId}`,
+
+              type: Number(
+                live.node_type ??
+                settings.node_type ??
+                -1
+              ),
+
+              state: Number(
+                live.sensor_state ?? 0
+              ),
+
+              battery:
+                live.battery_lvl == null
+                  ? null
+                  : Number(live.battery_lvl),
+
+              rssi:
+                live.rssi == null
+                  ? null
+                  : Math.round(Number(live.rssi)),
+
+              last_update: formattedTime,
+
+              raw_date: rawDate,
+
+              location_tab:
+                settings.location_tab || "unassigned"
+            };
           }
-        }
+        );
 
-        const currentNodeData = {
-          ...data,
-          id: node_id,
-          name: data.custom_name || `Czujnik #${node_id}`, 
-          type: Number(data.node_type), 
-          state: data.sensor_state,
-          battery: data.battery_lvl || 0,
-          rssi: Math.round(data.rssi) || 0,
-          last_update: formatted_time,
-          raw_date: raw_date, 
-          location_tab: data.location_tab || 'unassigned',
-        };
+        setNodes(updatedNodes);
 
-        live_nodes[node_id] = currentNodeData;
-        
-        previousStates.current[node_id] = currentNodeData.state;
-      });
-      
-      setNodes(live_nodes);
-    }, (error) => {
-        console.error("Błąd połączenia z bazą Firestore:", error);
-    });
+        console.log(
+          "[RTDB] Dashboard updated:",
+          Object.keys(updatedNodes).length,
+          "sensors"
+        );
+      },
+
+      (error) => {
+        console.error(
+          "[RTDB] Failed to load sensors:",
+          error
+        );
+      }
+    );
 
     return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-      unsub(); 
+      clearInterval(clockInterval);
+      unsubscribeConnection();
+      unsubscribeSensors();
     };
   }, []);
 
   const batteryState = (level) => {
+    if (level == null) {
+      return (
+        <div className="flex items-center space-x-1 text-[10px] font-medium bg-black/20 px-2 py-1 rounded-full border border-white/5">
+          <Battery size={12} className="text-white/30" />
+          <span className="text-white/40">—</span>
+        </div>
+      );
+    }
     let color_class = 'text-[#4dc4c9]';
     let StatusIcon = Battery;
-    if (level <= 20) { color_class = 'text-red-400'; StatusIcon = BatteryWarning; } 
+    if (level <= 20) { color_class = 'text-red-400'; StatusIcon = BatteryWarning; }
     else if (level <= 50) { color_class = 'text-[#d9652b]'; }
 
     return (
@@ -88,6 +167,14 @@ const Dashboard = () => {
   };
 
   const signalPower = (rssi) => {
+    if (rssi == null) {
+      return (
+        <div className="flex items-center space-x-1 text-[10px] font-medium bg-black/20 px-2 py-1 rounded-full border border-white/5">
+          <Wifi size={12} className="text-white/30" />
+          <span className="text-white/40">—</span>
+        </div>
+      );
+    }
     let color_class = 'text-[#4dc4c9]';
     if (rssi < -85) color_class = 'text-red-400';
     else if (rssi < -70) color_class = 'text-[#d9652b]';
@@ -104,22 +191,22 @@ const Dashboard = () => {
 
   return (
     <div className="relative z-10 w-full px-4 md:px-8 py-6 md:py-12 flex flex-col min-h-screen">
-      
+
       <header className="flex justify-between items-center mb-8 md:mb-16">
         <h1 className="text-2xl md:text-3xl font-light tracking-tight text-white flex items-center gap-3">
           loriota
           {status === 'connected' ? (
-             <span className="relative flex h-2.5 w-2.5">
-               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4dc4c9] opacity-75"></span>
-               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4dc4c9] shadow-[0_0_8px_rgba(77,196,201,0.8)]"></span>
-             </span>
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4dc4c9] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4dc4c9] shadow-[0_0_8px_rgba(77,196,201,0.8)]"></span>
+            </span>
           ) : (
             <span className="relative flex h-2.5 w-2.5">
-               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#d9652b]"></span>
-             </span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#d9652b]"></span>
+            </span>
           )}
         </h1>
-        
+
         <div className="flex items-center gap-3">
           <button className="relative w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center backdrop-blur-xl hover:bg-white/10 transition-colors shadow-lg">
             <SettingsIcon size={20} className="text-white/80" />
@@ -132,7 +219,7 @@ const Dashboard = () => {
             <Bell size={20} className="text-white/80" />
           </button>
 
-          <button 
+          <button
             onClick={() => signOut(auth)}
             className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center backdrop-blur-xl hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 transition-colors shadow-lg text-white/80"
           >
@@ -142,7 +229,7 @@ const Dashboard = () => {
       </header>
 
       <main className="flex-1 w-full flex flex-col gap-10">
-        
+
         <section className="flex flex-col md:flex-row items-start md:items-end justify-between gap-8">
           <div>
             <div className="text-6xl md:text-[7rem] leading-none font-light tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.1)]">
@@ -179,126 +266,126 @@ const Dashboard = () => {
         </section>
 
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
-          
+
           {Object.values(nodes)
             .filter(node => {
               if (location === 'all') return true;
               return node.location_tab === location;
             })
             .map(node => {
-            
-            const is_offline = node.raw_date ? (time - node.raw_date) > (16 * 60 * 1000) : true;
-            
-            const is_closed = node.state === 0;
-            const is_open = node.state === 1;
-            const is_vibrating = node.state === 2;
 
-            if (node.type === 0) {
-              const has_vibration = node.state === 2;
-              const has_new_letter = false; 
-              
-              return (
-                <div key={node.id} className={`relative overflow-hidden rounded-[32px] p-[1px] transition-all duration-500 w-full animate-in fade-in zoom-in-95 
+              const is_offline = node.raw_date ? (time - node.raw_date) > (16 * 60 * 1000) : true;
+
+              const is_closed = node.state === 0;
+              const is_open = node.state === 1;
+              const is_vibrating = node.state === 2;
+
+              if (node.type === 0) {
+                const has_vibration = node.state === 2;
+                const has_new_letter = false;
+
+                return (
+                  <div key={node.id} className={`relative overflow-hidden rounded-[32px] p-[1px] transition-all duration-500 w-full animate-in fade-in zoom-in-95 
                   ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : has_vibration ? 'bg-gradient-to-r from-amber-400/60 to-[#d9652b]/60 scale-[1.02] shadow-[0_0_30px_rgba(245,158,11,0.2)]' : has_new_letter ? 'bg-gradient-to-r from-[#4dc4c9]/50 to-blue-500/50' : 'bg-white/5'}`}>
-                  <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${has_vibration && !is_offline ? 'bg-[#1c160e]/80' : 'bg-[#151210]/60'}`}>
-                    {has_vibration && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-amber-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
+                    <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${has_vibration && !is_offline ? 'bg-[#1c160e]/80' : 'bg-[#151210]/60'}`}>
+                      {has_vibration && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-amber-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
 
-                    <div className="flex justify-between items-center mb-6 relative z-10">
-                      <div className="flex items-center space-x-4 min-w-0">
-                        <div className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center border relative shadow-inner transition-colors duration-300 
+                      <div className="flex justify-between items-center mb-6 relative z-10">
+                        <div className="flex items-center space-x-4 min-w-0">
+                          <div className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center border relative shadow-inner transition-colors duration-300 
                           ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : has_vibration ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : has_new_letter ? 'bg-[#4dc4c9]/20 border-[#4dc4c9]/30 text-[#4dc4c9]' : 'bg-black/30 border-white/5 text-white/40'}`}>
-                          <Mailbox size={24} className={has_vibration && !is_offline ? 'animate-bounce' : ''} />
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className={`text-lg font-light truncate ${is_offline ? 'text-white/50 line-through' : 'text-white'}`}>{node.name}</h3>
-                          <div className="flex flex-col space-y-1 mt-1">
-                            {is_offline ? (
-                              <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
-                            ) : has_vibration ? (
-                              <span className="text-sm font-medium text-amber-400 flex items-center gap-1.5 whitespace-nowrap"><Activity size={14} /> Wykryto wstrząsy!</span>
-                            ) : (
-                              <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Spoczynek</span>
-                            )}
+                            <Mailbox size={24} className={has_vibration && !is_offline ? 'animate-bounce' : ''} />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className={`text-lg font-light truncate ${is_offline ? 'text-white/50 line-through' : 'text-white'}`}>{node.name}</h3>
+                            <div className="flex flex-col space-y-1 mt-1">
+                              {is_offline ? (
+                                <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
+                              ) : has_vibration ? (
+                                <span className="text-sm font-medium text-amber-400 flex items-center gap-1.5 whitespace-nowrap"><Activity size={14} /> Wykryto wstrząsy!</span>
+                              ) : (
+                                <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Spoczynek</span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className={`flex items-center justify-between relative z-10 mt-auto ${is_offline ? 'opacity-30' : ''}`}>
-                      <div className="flex space-x-2">
-                        {batteryState(node.battery)}
-                        {signalPower(node.rssi)}
+                      <div className={`flex items-center justify-between relative z-10 mt-auto ${is_offline ? 'opacity-30' : ''}`}>
+                        <div className="flex space-x-2">
+                          {batteryState(node.battery)}
+                          {signalPower(node.rssi)}
+                        </div>
+                        <span className="text-xs text-white/30 font-light">{node.last_update}</span>
                       </div>
-                      <span className="text-xs text-white/30 font-light">{node.last_update}</span>
                     </div>
                   </div>
-                </div>
-              );
-            }
+                );
+              }
 
-            if (node.type === 1 || node.type === 2 || node.type === 3) {
-              
-              let IconOpen = node.type === 1 ? DoorOpen : node.type === 2 ? Unlock : Layout;
-              let IconClosed = node.type === 1 ? DoorClosed : node.type === 2 ? Lock : LayoutTemplate;
+              if (node.type === 1 || node.type === 2 || node.type === 3) {
+
+                let IconOpen = node.type === 1 ? DoorOpen : node.type === 2 ? Unlock : Layout;
+                let IconClosed = node.type === 1 ? DoorClosed : node.type === 2 ? Lock : LayoutTemplate;
+
+                return (
+                  <div key={node.id} className={`relative overflow-hidden rounded-[32px] p-[1px] transition-all duration-500 w-full animate-in fade-in zoom-in-95 
+                  ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : is_open ? 'bg-gradient-to-r from-[#d9652b]/60 to-red-500/60 shadow-[0_0_30px_rgba(217,101,43,0.2)] scale-[1.02]' : is_vibrating ? 'bg-gradient-to-r from-amber-400/60 to-yellow-500/60 shadow-[0_0_30px_rgba(245,158,11,0.2)] scale-[1.02]' : 'bg-white/5'}`}>
+
+                    <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${is_open && !is_offline ? 'bg-[#1c120e]/80' : is_vibrating && !is_offline ? 'bg-[#1c160e]/80' : 'bg-[#151210]/60'}`}>
+
+                      {is_open && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-[#d9652b]/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
+                      {is_vibrating && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-amber-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
+
+                      <div className="flex justify-between items-center mb-6 relative z-10">
+                        <div className="flex items-center space-x-4 min-w-0">
+
+                          <div className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center border shadow-inner transition-colors duration-300 
+                          ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : is_open ? 'bg-[#d9652b]/20 border-[#d9652b]/30 text-[#d9652b]' : is_vibrating ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : 'bg-black/30 border-white/5 text-white/40'}`}>
+                            {is_open ? <IconOpen size={24} /> : is_vibrating ? <Activity size={24} className="animate-pulse" /> : <IconClosed size={24} />}
+                          </div>
+
+                          <div className="min-w-0">
+                            <h3 className={`text-lg font-light truncate ${is_offline ? 'text-white/50 line-through' : 'text-white'}`}>{node.name}</h3>
+                            <div className="flex items-center space-x-1.5 mt-1">
+                              {is_offline ? (
+                                <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
+                              ) : is_open ? (
+                                <span className="text-sm font-medium text-[#d9652b] flex items-center gap-1.5 whitespace-nowrap"><AlertOctagon size={14} /> Otwarte</span>
+                              ) : is_vibrating ? (
+                                <span className="text-sm font-medium text-amber-400 flex items-center gap-1.5 whitespace-nowrap"><Activity size={14} /> Pukanie / Wstrząsy</span>
+                              ) : (
+                                <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Zamknięte</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className={`flex items-center justify-between relative z-10 mt-auto ${is_offline ? 'opacity-30' : ''}`}>
+                        <div className="flex space-x-2">
+                          {batteryState(node.battery)}
+                          {signalPower(node.rssi)}
+                        </div>
+                        <span className="text-xs text-white/30 font-light">{node.last_update}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
 
               return (
-                <div key={node.id} className={`relative overflow-hidden rounded-[32px] p-[1px] transition-all duration-500 w-full animate-in fade-in zoom-in-95 
-                  ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : is_open ? 'bg-gradient-to-r from-[#d9652b]/60 to-red-500/60 shadow-[0_0_30px_rgba(217,101,43,0.2)] scale-[1.02]' : is_vibrating ? 'bg-gradient-to-r from-amber-400/60 to-yellow-500/60 shadow-[0_0_30px_rgba(245,158,11,0.2)] scale-[1.02]' : 'bg-white/5'}`}>
-                  
-                  <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${is_open && !is_offline ? 'bg-[#1c120e]/80' : is_vibrating && !is_offline ? 'bg-[#1c160e]/80' : 'bg-[#151210]/60'}`}>
-                    
-                    {is_open && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-[#d9652b]/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
-                    {is_vibrating && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-amber-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
-                    
-                    <div className="flex justify-between items-center mb-6 relative z-10">
-                      <div className="flex items-center space-x-4 min-w-0">
-                        
-                        <div className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center border shadow-inner transition-colors duration-300 
-                          ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : is_open ? 'bg-[#d9652b]/20 border-[#d9652b]/30 text-[#d9652b]' : is_vibrating ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : 'bg-black/30 border-white/5 text-white/40'}`}>
-                          {is_open ? <IconOpen size={24} /> : is_vibrating ? <Activity size={24} className="animate-pulse" /> : <IconClosed size={24} />}
-                        </div>
-                        
-                        <div className="min-w-0">
-                          <h3 className={`text-lg font-light truncate ${is_offline ? 'text-white/50 line-through' : 'text-white'}`}>{node.name}</h3>
-                          <div className="flex items-center space-x-1.5 mt-1">
-                            {is_offline ? (
-                              <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
-                            ) : is_open ? (
-                              <span className="text-sm font-medium text-[#d9652b] flex items-center gap-1.5 whitespace-nowrap"><AlertOctagon size={14} /> Otwarte</span>
-                            ) : is_vibrating ? (
-                              <span className="text-sm font-medium text-amber-400 flex items-center gap-1.5 whitespace-nowrap"><Activity size={14} /> Pukanie / Wstrząsy</span>
-                            ) : (
-                              <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Zamknięte</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className={`flex items-center justify-between relative z-10 mt-auto ${is_offline ? 'opacity-30' : ''}`}>
-                      <div className="flex space-x-2">
-                        {batteryState(node.battery)}
-                        {signalPower(node.rssi)}
-                      </div>
-                      <span className="text-xs text-white/30 font-light">{node.last_update}</span>
+                <div key={node.id} className="relative overflow-hidden rounded-[32px] p-[1px] bg-white/5 opacity-50 w-full animate-in fade-in">
+                  <div className="relative z-10 rounded-[31px] p-6 h-full bg-[#151210]/60 backdrop-blur-2xl flex flex-col justify-center">
+                    <h3 className="text-lg font-medium text-red-400 mb-2">Błąd typu urządzenia</h3>
+                    <div className="text-sm font-light text-white/50 space-y-1">
+                      <p>Węzeł: #{node.id}</p>
+                      <p>Typ odebrany z bazy: "{node.type}"</p>
                     </div>
                   </div>
                 </div>
               );
-            }
-
-            return (
-              <div key={node.id} className="relative overflow-hidden rounded-[32px] p-[1px] bg-white/5 opacity-50 w-full animate-in fade-in">
-                <div className="relative z-10 rounded-[31px] p-6 h-full bg-[#151210]/60 backdrop-blur-2xl flex flex-col justify-center">
-                  <h3 className="text-lg font-medium text-red-400 mb-2">Błąd typu urządzenia</h3>
-                  <div className="text-sm font-light text-white/50 space-y-1">
-                    <p>Węzeł: #{node.id}</p>
-                    <p>Typ odebrany z bazy: "{node.type}"</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+            })}
 
         </section>
       </main>

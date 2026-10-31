@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { collectionGroup, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import {
+  ref,
+  query,
+  orderByChild,
+  limitToLast,
+  onValue
+} from 'firebase/database';
+
+import { rtdb } from '../firebaseConfig';
 import { Clock, Activity, AlertTriangle, Lock, Unlock, Zap, CheckCircle2 } from 'lucide-react';
 
 const History = () => {
@@ -10,24 +17,25 @@ const History = () => {
 
   useEffect(() => {
     const q = query(
-      collectionGroup(db, 'readings'),
-      orderBy('timestamp', 'desc'),
-      limit(50)
+      ref(rtdb, 'history'),
+      orderByChild('timestamp'),
+      limitToLast(50)
     );
 
-    const unsub = onSnapshot(q, (snapshot) => {
+    const unsub = onValue(q, (snapshot) => {
       const history_data = [];
-      
+
       snapshot.forEach((doc_snap) => {
-        const data = doc_snap.data();
-        
-        const path_segments = doc_snap.ref.path.split('/');
-        const node_id = path_segments.length > 2 ? path_segments[1] : 'Nieznany';
-        
+        const data = doc_snap.val();
+
+        const node_id = data.node_id != null
+          ? String(data.node_id)
+          : 'Nieznany';
+
         let date = null;
         let hour = "Nieznany czas";
         let day = "";
-        
+
         if (data.timestamp) {
           try {
             date = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
@@ -61,7 +69,7 @@ const History = () => {
         if (type === 1 || type === 2) {
           if (data.sensor_state === 1) { // 1 = open
             activity = "Otwarte.";
-            event_icon = Unlock; 
+            event_icon = Unlock;
             icon_color = "text-[#d9652b]";
             description = type === 1 ? "Kontaktron nie wykrywa magnesu." : "Czujnik Halla nie wykrywa pola magnetycznego.";
           } else if (data.sensor_state === 2) { // 2 = vibrations
@@ -80,7 +88,7 @@ const History = () => {
         if (type === 3) {
           if (data.sensor_state === 1) { // 1 = open
             activity = "Otwarte";
-            event_icon = Activity; 
+            event_icon = Activity;
             icon_color = "text-[#d9652b]";
             description = "Czujnik podczerwieni nie zarejestrował przeszkody.";
           } else if (data.sensor_state === 2) { // 2 = vibrations
@@ -98,7 +106,7 @@ const History = () => {
 
         history_data.push({
           id: doc_snap.id,
-          node_id: node_id, 
+          node_id: node_id,
           hour,
           day,
           title: activity,
@@ -107,12 +115,17 @@ const History = () => {
           icon_color
         });
       });
-      
+
+      history_data.reverse();
+
       setLogs(history_data);
       setLoading(false);
       setErrorMsg('');
     }, (error) => {
-        console.error("Błąd bazy danych:", error);
+      console.error("[RTDB] History read error:", error);
+
+      setErrorMsg("Nie udało się pobrać historii zdarzeń.");
+      setLoading(false);
     });
 
     return () => unsub();
@@ -120,7 +133,7 @@ const History = () => {
 
   return (
     <div className="p-4 md:p-8 animate-in fade-in duration-500 w-full max-w-3xl mx-auto mb-20">
-      
+
       <header className="flex items-center gap-4 mb-12 border-b border-white/5 pb-6">
         <div className="w-12 h-12 rounded-full bg-[#4dc4c9]/10 flex items-center justify-center border border-[#4dc4c9]/20">
           <Clock className="text-[#4dc4c9]" size={24} />
@@ -139,7 +152,7 @@ const History = () => {
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-white/50">
-           <Clock className="animate-spin mr-2" size={20} /> Ładowanie danych...
+          <Clock className="animate-spin mr-2" size={20} /> Ładowanie danych...
         </div>
       ) : logs.length === 0 && !error_msg ? (
         <div className="text-center py-20 text-white/40 font-light">
@@ -149,11 +162,11 @@ const History = () => {
         <div className="relative border-l border-white/10 ml-4 md:ml-6 space-y-8">
           {logs.map((log) => (
             <div key={log.id} className="relative pl-8 md:pl-10">
-              
+
               <span className="absolute -left-[20px] top-1 rounded-full bg-[#0d0a08] p-2 border border-white/10 shadow-lg">
                 <log.Icon size={18} className={log.icon_color} />
               </span>
-              
+
               <div className="bg-white/5 border border-white/5 backdrop-blur-md rounded-2xl p-4 transition-all hover:bg-white/10">
                 <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2 mb-2">
                   <div className="flex items-center gap-3">
@@ -164,7 +177,7 @@ const History = () => {
                       Węzeł #{log.node_id}
                     </span>
                   </div>
-                  
+
                   <div className="flex items-center gap-2 text-xs font-medium text-white/40 bg-black/20 px-3 py-1 rounded-full w-fit">
                     <span>{log.day}</span>
                     <span className="w-1 h-1 rounded-full bg-white/20"></span>

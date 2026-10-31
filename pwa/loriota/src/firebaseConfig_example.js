@@ -1,8 +1,8 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
-import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getMessaging } from "firebase/messaging";
+import { getDatabase, forceWebSockets } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "api_key",
@@ -14,8 +14,15 @@ const firebaseConfig = {
   measurementId: "meas_id"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-export const db = getFirestore(app);
+
+forceWebSockets();
+export const rtdb = getDatabase(
+  app,
+  "database_url"
+);
+
 export const auth = getAuth(app);
+export const messaging = getMessaging(app);
+export const analytics = getAnalytics(app);
+forceWebSockets();
