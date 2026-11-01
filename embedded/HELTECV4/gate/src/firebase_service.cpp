@@ -1,484 +1,837 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <Firebase_ESP_Client.h>
-#include <addons/TokenHelper.h>
+#include <WiFiClientSecure.h>
 #include <time.h>
+#include <deque>
+#include <map>
+#include <vector>
+
+#define ENABLE_SERVICE_AUTH
+#define ENABLE_DATABASE
+#define ENABLE_MESSAGING
+#include <FirebaseClient.h>
 
 #include "sensitive_data.h"
 #include "shared_state.h"
 #include "firebase_service.h"
 
-void initializeFirebase()
+namespace
 {
-    if (firebaseInitialized ||
-        WiFi.status() != WL_CONNECTED)
+struct Reading
+{
+    QueueMessage message;
+    String timestamp;
+};
+
+struct Alarm
+{
+    uint16_t nodeId;
+    int state;
+    uint8_t attempts;
+};
+
+constexpr size_t MAX_HISTORY_QUEUE = 64;
+constexpr size_t MAX_ALARM_QUEUE = 32;
+constexpr uint32_t RETRY_DELAY_MS = 2000;
+
+constexpr const char *DATABASE_URL =
+    "https://loriota-8d71a-default-rtdb.europe-west1.firebasedatabase.app/";
+
+constexpr const char *APP_URL =
+    "https://loriota-8d71a.web.app";
+
+ServiceAuth serviceAuth(
+    FIREBASE_CLIENT_EMAIL,
+    FIREBASE_PROJECT_ID,
+    FIREBASE_PRIVATE_KEY,
+    3000
+);
+
+FirebaseApp firebaseApp;
+
+WiFiClientSecure authSSL;
+WiFiClientSecure liveSSL;
+WiFiClientSecure historySSL;
+WiFiClientSecure notificationSSL;
+
+AsyncClientClass authClient(authSSL);
+AsyncClientClass liveClient(liveSSL);
+AsyncClientClass historyClient(historySSL);
+AsyncClientClass notificationClient(notificationSSL);
+
+RealtimeDatabase database;
+Messaging messaging;
+
+std::map<uint16_t, Reading> pendingLive;
+std::deque<Reading> pendingHistory;
+std::deque<Alarm> pendingAlarms;
+std::map<uint16_t, uint32_t> lastAlarmByNode;
+
+std::vector<String> activeTokens;
+
+Reading currentLive;
+Alarm currentAlarm = {0, 0, 0};
+
+bool liveInFlight = false;
+bool historyInFlight = false;
+bool tokenReadInFlight = false;
+bool notificationInFlight = false;
+bool alarmActive = false;
+
+volatile bool initializationRequested = false;
+volatile bool firebaseReadyFlag = false;
+
+size_t activeTokenIndex = 0;
+int activeSuccessCount = 0;
+
+uint32_t liveStarted = 0;
+uint32_t historyStarted = 0;
+uint32_t alarmStarted = 0;
+
+uint32_t nextLiveRetry = 0;
+uint32_t nextHistoryRetry = 0;
+uint32_t nextAlarmRetry = 0;
+
+bool due(uint32_t deadline)
+{
+    return static_cast<int32_t>(millis() - deadline) >= 0;
+}
+
+void logMessage(const String &message)
+{
+    if (serialMutex != nullptr)
+    {
+        xSemaphoreTake(serialMutex, portMAX_DELAY);
+    }
+
+    Serial.println(message);
+
+    if (serialMutex != nullptr)
+    {
+        xSemaphoreGive(serialMutex);
+    }
+}
+
+Reading makeReading(const QueueMessage &message)
+{
+    Reading reading;
+    reading.message = message;
+
+    time_t now = time(nullptr);
+
+    if (now > 1700000000)
+    {
+        struct tm utcTime;
+        gmtime_r(&now, &utcTime);
+
+        char buffer[32];
+
+        strftime(
+            buffer,
+            sizeof(buffer),
+            "%Y-%m-%dT%H:%M:%SZ",
+            &utcTime
+        );
+
+        reading.timestamp = buffer;
+    }
+
+    return reading;
+}
+
+String createSensorJSON(
+    const Reading &reading,
+    bool includeNodeId
+)
+{
+    const auto &data = reading.message.data;
+
+    String json = "{";
+
+    if (includeNodeId)
+    {
+        json += "\"node_id\":";
+        json += String(data.node_id);
+        json += ",";
+    }
+
+    json += "\"node_type\":";
+    json += String(data.node_type);
+
+    json += ",\"msg_counter\":";
+    json += String(data.msg_counter);
+
+    json += ",\"acc_x\":";
+    json += String(data.acc_x);
+
+    json += ",\"acc_y\":";
+    json += String(data.acc_y);
+
+    json += ",\"acc_z\":";
+    json += String(data.acc_z);
+
+    json += ",\"sensor_state\":";
+    json += String(data.sensor_state);
+
+    json += ",\"battery_lvl\":";
+    json += String(data.battery_lvl);
+
+    json += ",\"rssi\":";
+    json += String(static_cast<int>(reading.message.rssi));
+
+    if (!reading.timestamp.isEmpty())
+    {
+        json += ",\"timestamp\":\"";
+        json += reading.timestamp;
+        json += "\"";
+    }
+
+    json += "}";
+
+    return json;
+}
+
+std::vector<String> parseTokens(const String &json)
+{
+    std::vector<String> result;
+
+    bool quoted = false;
+    bool escaped = false;
+
+    String value;
+
+    for (size_t i = 0; i < json.length(); ++i)
+    {
+        char c = json[i];
+
+        if (!quoted)
+        {
+            if (c == '"')
+            {
+                quoted = true;
+                escaped = false;
+                value = "";
+            }
+
+            continue;
+        }
+
+        if (escaped)
+        {
+            value += c;
+            escaped = false;
+            continue;
+        }
+
+        if (c == '\\')
+        {
+            escaped = true;
+            continue;
+        }
+
+        if (c == '"')
+        {
+            quoted = false;
+
+            if (value.length() > 30 && value.indexOf(':') >= 0)
+            {
+                result.push_back(value);
+            }
+
+            continue;
+        }
+
+        value += c;
+    }
+
+    return result;
+}
+
+void onAuthResult(AsyncResult &result)
+{
+    if (!result.isResult())
     {
         return;
     }
 
-    config.service_account.data.client_email =
-        FIREBASE_CLIENT_EMAIL;
+    if (result.isError())
+    {
+        logMessage(
+            "[Firebase] Authentication error: " +
+            result.error().message()
+        );
+    }
+}
 
-    config.service_account.data.project_id =
-        FIREBASE_PROJECT_ID;
+void onLiveResult(AsyncResult &result)
+{
+    if (!result.isResult())
+    {
+        return;
+    }
 
-    config.service_account.data.private_key =
-        FIREBASE_PRIVATE_KEY;
+    if (!result.isError() && !result.available())
+    {
+        return;
+    }
 
-    config.database_url =
-        "https://loriota-8d71a-default-rtdb.europe-west1.firebasedatabase.app/";
+    uint16_t nodeId = currentLive.message.data.node_id;
+    uint32_t counter = currentLive.message.data.msg_counter;
 
-    config.signer.tokens.scope =
-        "https://www.googleapis.com/auth/firebase.messaging "
-        "https://www.googleapis.com/auth/firebase.database "
-        "https://www.googleapis.com/auth/userinfo.email";
+    if (result.isError())
+    {
+        logMessage(
+            "[RTDB] Live update failed for node " +
+            String(nodeId) +
+            ", counter " +
+            String(counter) +
+            ": " +
+            result.error().message()
+        );
 
-    config.token_status_callback =
-        tokenStatusCallback;
+        nextLiveRetry = millis() + RETRY_DELAY_MS;
+    }
+    else
+    {
+        auto it = pendingLive.find(nodeId);
 
-    Firebase.begin(&config, &auth);
-    Firebase.reconnectWiFi(true);
+        if (it != pendingLive.end() &&
+            it->second.message.data.msg_counter == counter)
+        {
+            pendingLive.erase(it);
+        }
+
+        logMessage(
+            "[RTDB] Node " +
+            String(nodeId) +
+            " updated successfully."
+        );
+
+        logMessage(
+            "[RTDB] Live update duration: " +
+            String(millis() - liveStarted) +
+            " ms"
+        );
+    }
+
+    liveInFlight = false;
+}
+
+void onHistoryResult(AsyncResult &result)
+{
+    if (!result.isResult())
+    {
+        return;
+    }
+
+    if (!result.isError() && !result.available())
+    {
+        return;
+    }
+
+    logMessage(
+        "[PERF] History write duration: " +
+        String(millis() - historyStarted) +
+        " ms"
+    );
+
+    if (result.isError())
+    {
+        logMessage(
+            "[RTDB] History write failed: " +
+            result.error().message()
+        );
+
+        nextHistoryRetry = millis() + RETRY_DELAY_MS;
+    }
+    else
+    {
+        if (!pendingHistory.empty())
+        {
+            pendingHistory.pop_front();
+        }
+
+        logMessage(
+            "[RTDB] Historical reading saved successfully."
+        );
+
+        String entryId =
+            result.to<RealtimeDatabaseResult>().name();
+
+        if (!entryId.isEmpty())
+        {
+            logMessage(
+                "[RTDB] History entry ID: " + entryId
+            );
+        }
+    }
+
+    historyInFlight = false;
+}
+
+void finishAlarm()
+{
+    logMessage(
+        "[FCM] Notification sent to " +
+        String(activeSuccessCount) +
+        " devices."
+    );
+
+    logMessage(
+        "[PERF] FCM duration: " +
+        String(millis() - alarmStarted) +
+        " ms"
+    );
+
+    activeTokens.clear();
+
+    activeTokenIndex = 0;
+    activeSuccessCount = 0;
+
+    alarmActive = false;
+    notificationInFlight = false;
+}
+
+void onNotificationResult(AsyncResult &result)
+{
+    if (!result.isResult())
+    {
+        return;
+    }
+
+    if (!result.isError() && !result.available())
+    {
+        return;
+    }
+
+    if (result.isError())
+    {
+        logMessage(
+            "[FCM] Send failed: " +
+            result.error().message()
+        );
+    }
+    else
+    {
+        ++activeSuccessCount;
+    }
+
+    notificationInFlight = false;
+    ++activeTokenIndex;
+
+    if (activeTokenIndex >= activeTokens.size())
+    {
+        finishAlarm();
+    }
+}
+
+void onTokensResult(AsyncResult &result)
+{
+    if (!result.isResult())
+    {
+        return;
+    }
+
+    if (!result.isError() && !result.available())
+    {
+        return;
+    }
+
+    tokenReadInFlight = false;
+
+    if (result.isError())
+    {
+        logMessage(
+            "[FCM] Token read failed: " +
+            result.error().message()
+        );
+
+        if (currentAlarm.attempts < 2)
+        {
+            ++currentAlarm.attempts;
+            pendingAlarms.push_front(currentAlarm);
+
+            nextAlarmRetry =
+                millis() + RETRY_DELAY_MS;
+        }
+
+        return;
+    }
+
+    activeTokens = parseTokens(String(result.c_str()));
+
+    activeTokenIndex = 0;
+    activeSuccessCount = 0;
+    alarmStarted = millis();
+    alarmActive = true;
+
+    logMessage("\n[FCM] Sending notification...");
+    logMessage("[FCM] Token source: Realtime Database");
+
+    logMessage(
+        "[FCM] Available tokens: " +
+        String(activeTokens.size())
+    );
+
+    if (activeTokens.empty())
+    {
+        finishAlarm();
+    }
+}
+
+void enqueueReading(const QueueMessage &message)
+{
+    Reading reading = makeReading(message);
+
+    uint16_t nodeId = message.data.node_id;
+    int state = message.data.sensor_state;
+
+    pendingLive[nodeId] = reading;
+
+    if (pendingHistory.size() >= MAX_HISTORY_QUEUE)
+    {
+        if (historyInFlight && pendingHistory.size() > 1)
+        {
+            pendingHistory.erase(
+                pendingHistory.begin() + 1
+            );
+        }
+        else
+        {
+            pendingHistory.pop_front();
+        }
+
+        logMessage(
+            "[RTDB] History buffer full: oldest record discarded."
+        );
+    }
+
+    pendingHistory.push_back(reading);
+
+    int previousState = 0;
+
+    auto previousIt =
+        previousSensorStates.find(nodeId);
+
+    if (previousIt != previousSensorStates.end())
+    {
+        previousState = previousIt->second;
+    }
+
+    if (state != previousState &&
+        (state == 1 || state == 2))
+    {
+        uint32_t now = millis();
+
+        auto alarmIt =
+            lastAlarmByNode.find(nodeId);
+
+        bool allowed =
+            alarmIt == lastAlarmByNode.end() ||
+            static_cast<uint32_t>(
+                now - alarmIt->second
+            ) >= 2000;
+
+        if (allowed)
+        {
+            if (pendingAlarms.size() < MAX_ALARM_QUEUE)
+            {
+                pendingAlarms.push_back(
+                    {nodeId, state, 0}
+                );
+
+                lastAlarmByNode[nodeId] = now;
+                lastAlarmTime = now;
+            }
+            else
+            {
+                logMessage(
+                    "[FCM] Alarm buffer full."
+                );
+            }
+        }
+        else
+        {
+            logMessage(
+                "[FCM] Notification rejected (<2s for this node)."
+            );
+        }
+    }
+
+    previousSensorStates[nodeId] = state;
+
+    logMessage(
+        "[PERF] Processing node " +
+        String(nodeId) +
+        ", counter " +
+        String(message.data.msg_counter) +
+        ", queued frames: " +
+        String(uxQueueMessagesWaiting(loraQueue))
+    );
+}
+
+void beginFirebase()
+{
+    time_t now = time(nullptr);
+
+    if (now <= 1700000000)
+    {
+        return;
+    }
+
+    authSSL.setInsecure();
+    liveSSL.setInsecure();
+    historySSL.setInsecure();
+    notificationSSL.setInsecure();
+
+    firebaseApp.setTime(
+        static_cast<uint32_t>(now)
+    );
+
+    initializeApp(
+        authClient,
+        firebaseApp,
+        getAuth(serviceAuth),
+        onAuthResult,
+        "auth"
+    );
+
+    firebaseApp.getApp<RealtimeDatabase>(database);
+    firebaseApp.getApp<Messaging>(messaging);
+
+    database.url(DATABASE_URL);
 
     firebaseInitialized = true;
 
-    Serial.println("[Firebase] Initialized.");
+    logMessage("[Firebase] Initialized.");
 }
 
-
-void sendAlarmNotification(int state)
+void scheduleLive()
 {
-    xSemaphoreTake(serialMutex, portMAX_DELAY);
-    Serial.println("\n[FCM] Sending notification...");
-    xSemaphoreGive(serialMutex);
-
-    if (!Firebase.RTDB.getArray(
-            &fbdo,
-            "/config/device/tokens"))
+    if (liveInFlight ||
+        pendingLive.empty() ||
+        !due(nextLiveRetry))
     {
-        xSemaphoreTake(serialMutex, portMAX_DELAY);
-
-        Serial.print("[FCM] Token read failed: ");
-        Serial.println(fbdo.errorReason());
-
-        xSemaphoreGive(serialMutex);
         return;
     }
 
-    FirebaseJsonArray tokens;
-    tokens.setJsonArrayData(
-        fbdo.jsonArray().raw()
+    auto it = pendingLive.begin();
+
+    currentLive = it->second;
+    liveStarted = millis();
+    liveInFlight = true;
+
+    String path =
+        "/sensors/" +
+        String(currentLive.message.data.node_id) +
+        "/live";
+
+    String json = createSensorJSON(
+        currentLive,
+        false
     );
 
-    const size_t tokenCount = tokens.size();
-
-    xSemaphoreTake(serialMutex, portMAX_DELAY);
-
-    Serial.println(
-        "[FCM] Token source: Realtime Database"
+    database.set<object_t>(
+        liveClient,
+        path,
+        object_t(json),
+        onLiveResult,
+        "live"
     );
+}
 
-    Serial.printf(
-        "[FCM] Available tokens: %u\n",
-        (unsigned int)tokenCount
-    );
-
-    xSemaphoreGive(serialMutex);
-
-    int successCount = 0;
-
-    for (size_t i = 0; i < tokenCount; i++)
+void scheduleHistory()
+{
+    if (historyInFlight ||
+        pendingHistory.empty() ||
+        !due(nextHistoryRetry))
     {
-        FirebaseJsonData tokenData;
-        tokens.get(tokenData, i);
-
-        if (!tokenData.success)
-        {
-            continue;
-        }
-
-        String deviceToken = tokenData.stringValue;
-
-        if (deviceToken.length() <= 10)
-        {
-            continue;
-        }
-
-        FCM_HTTPv1_JSON_Message msg;
-
-        msg.token = deviceToken;
-
-        msg.notification.title =
-            "ALARM LORIOTA!";
-
-        if (state == 1)
-        {
-            msg.notification.body =
-                "Wykryto otwarcie! Sprawdź aplikację Loriota.";
-        }
-        else if (state == 2)
-        {
-            msg.notification.body =
-                "Wykryto wstrząsy! Sprawdź aplikację Loriota.";
-        }
-        else
-        {
-            msg.notification.body =
-                "Wykryto aktywność czujnika!";
-        }
-
-        msg.webpush.fcm_options.link =
-            "https://loriota-8d71a.web.app";
-
-        msg.android.priority = "high";
-
-        msg.webpush.headers =
-            "{\"Urgency\":\"high\"}";
-
-        FirebaseJson customWebPush;
-
-        customWebPush.set(
-            "notification/requireInteraction",
-            true
-        );
-
-        customWebPush.set(
-            "notification/vibrate/[0]",
-            300
-        );
-
-        customWebPush.set(
-            "notification/vibrate/[1]",
-            200
-        );
-
-        customWebPush.set(
-            "notification/vibrate/[2]",
-            300
-        );
-
-        msg.webpush.notification =
-            customWebPush.raw();
-
-        if (Firebase.FCM.send(&fbdo, &msg))
-        {
-            successCount++;
-        }
-        else
-        {
-            xSemaphoreTake(serialMutex, portMAX_DELAY);
-
-            Serial.print("[FCM] Send failed: ");
-            Serial.println(fbdo.errorReason());
-
-            xSemaphoreGive(serialMutex);
-        }
+        return;
     }
 
-    xSemaphoreTake(serialMutex, portMAX_DELAY);
+    const Reading &reading = pendingHistory.front();
 
-    Serial.printf(
-        "[FCM] Notification sent to %d devices.\n",
-        successCount
+    if (reading.timestamp.isEmpty())
+    {
+        pendingHistory.pop_front();
+        logMessage(
+            "[RTDB] History skipped: time not synchronized."
+        );
+        return;
+    }
+
+    historyStarted = millis();
+    historyInFlight = true;
+
+    String json = createSensorJSON(
+        reading,
+        true
     );
 
-    xSemaphoreGive(serialMutex);
+    database.push<object_t>(
+        historyClient,
+        "/history",
+        object_t(json),
+        onHistoryResult,
+        "history"
+    );
+}
+
+void scheduleTokenRead()
+{
+    if (tokenReadInFlight ||
+        alarmActive ||
+        pendingAlarms.empty() ||
+        !due(nextAlarmRetry))
+    {
+        return;
+    }
+
+    currentAlarm = pendingAlarms.front();
+    pendingAlarms.pop_front();
+
+    tokenReadInFlight = true;
+
+    database.get(
+        notificationClient,
+        "/config/device/tokens",
+        onTokensResult,
+        false,
+        "tokens"
+    );
+}
+
+void scheduleNotification()
+{
+    if (!alarmActive ||
+        notificationInFlight ||
+        activeTokenIndex >= activeTokens.size())
+    {
+        return;
+    }
+
+    const String &token =
+        activeTokens[activeTokenIndex];
+
+    Messages::Message msg;
+    msg.token(token);
+
+    Messages::Notification notification;
+
+    notification.title("ALARM LORIOTA!");
+
+    if (currentAlarm.state == 1)
+    {
+        notification.body(
+            "Wykryto otwarcie! Sprawdź aplikację Loriota."
+        );
+    }
+    else if (currentAlarm.state == 2)
+    {
+        notification.body(
+            "Wykryto wstrząsy! Sprawdź aplikację Loriota."
+        );
+    }
+    else
+    {
+        notification.body(
+            "Wykryto aktywność czujnika!"
+        );
+    }
+
+    msg.notification(notification);
+
+    Messages::WebpushFcmOptions webOptions;
+    webOptions.link(APP_URL);
+
+    Messages::WebpushConfig webpush;
+    webpush.fcm_options(webOptions);
+
+    msg.webpush(webpush);
+
+    notificationInFlight = true;
+
+    messaging.send(
+        notificationClient,
+        Messages::Parent(FIREBASE_PROJECT_ID),
+        msg,
+        onNotificationResult,
+        "fcm"
+    );
+}
+}
+
+void initializeFirebase()
+{
+    initializationRequested = true;
+}
+
+bool firebaseServiceReady()
+{
+    return firebaseReadyFlag;
+}
+
+void sendAlarmNotification(int state)
+{
+    if (pendingAlarms.size() >= MAX_ALARM_QUEUE)
+    {
+        logMessage("[FCM] Alarm buffer full.");
+        return;
+    }
+
+    pendingAlarms.push_back({0, state, 0});
 }
 
 void firebaseTask(void *pvParameters)
 {
-    QueueMessage msg;
+    QueueMessage message;
 
     for (;;)
     {
-        if (xQueueReceive(
-                loraQueue,
-                &msg,
-                portMAX_DELAY) != pdPASS)
+        while (xQueueReceive(
+                   loraQueue,
+                   &message,
+                   0
+               ) == pdPASS)
         {
+            enqueueReading(message);
+        }
+
+        if (WiFi.status() != WL_CONNECTED)
+        {
+            firebaseReadyFlag = false;
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 
-        blinkLed(1);
-
-        while (
-            WiFi.status() != WL_CONNECTED ||
-            !Firebase.ready()
-        )
+        if (initializationRequested &&
+            !firebaseInitialized)
         {
-            vTaskDelay(pdMS_TO_TICKS(500));
+            beginFirebase();
         }
 
-        time_t now = time(nullptr);
-
-        bool validTime =
-            now > 1700000000;
-
-        char timestamp[32] = {0};
-
-        if (validTime)
+        if (firebaseInitialized)
         {
-            struct tm utcTime;
+            firebaseApp.loop();
 
-            gmtime_r(&now, &utcTime);
+            firebaseReadyFlag = firebaseApp.ready();
 
-            strftime(
-                timestamp,
-                sizeof(timestamp),
-                "%Y-%m-%dT%H:%M:%SZ",
-                &utcTime
-            );
-        }
-
-        FirebaseJson liveData;
-
-        liveData.set(
-            "node_type",
-            (int)msg.data.node_type
-        );
-
-        liveData.set(
-            "msg_counter",
-            (int)msg.data.msg_counter
-        );
-
-        liveData.set(
-            "acc_x",
-            (int)msg.data.acc_x
-        );
-
-        liveData.set(
-            "acc_y",
-            (int)msg.data.acc_y
-        );
-
-        liveData.set(
-            "acc_z",
-            (int)msg.data.acc_z
-        );
-
-        liveData.set(
-            "sensor_state",
-            (int)msg.data.sensor_state
-        );
-
-        liveData.set(
-            "battery_lvl",
-            (int)msg.data.battery_lvl
-        );
-
-        liveData.set(
-            "rssi",
-            (int)msg.rssi
-        );
-
-        if (validTime)
-        {
-            liveData.set(
-                "timestamp",
-                String(timestamp)
-            );
-        }
-
-        String livePath = "/sensors/";
-        livePath += String(msg.data.node_id);
-        livePath += "/live";
-
-        unsigned long uploadStarted =
-            millis();
-
-        bool liveSaved =
-            Firebase.RTDB.setJSON(
-                &fbdo,
-                livePath.c_str(),
-                &liveData
-            );
-
-        unsigned long uploadDuration =
-            millis() - uploadStarted;
-
-        xSemaphoreTake(serialMutex, portMAX_DELAY);
-
-        if (liveSaved)
-        {
-            Serial.printf(
-                "[RTDB] Node %u updated successfully.\n",
-                msg.data.node_id
-            );
-
-            Serial.printf(
-                "[RTDB] Live update duration: %lu ms\n",
-                uploadDuration
-            );
-        }
-        else
-        {
-            Serial.print(
-                "[RTDB] Live update failed: "
-            );
-
-            Serial.println(
-                fbdo.errorReason()
-            );
-        }
-
-        xSemaphoreGive(serialMutex);
-
-        if (validTime)
-        {
-            FirebaseJson historyData;
-
-            historyData.set(
-                "node_id",
-                (int)msg.data.node_id
-            );
-
-            historyData.set(
-                "node_type",
-                (int)msg.data.node_type
-            );
-
-            historyData.set(
-                "msg_counter",
-                (int)msg.data.msg_counter
-            );
-
-            historyData.set(
-                "acc_x",
-                (int)msg.data.acc_x
-            );
-
-            historyData.set(
-                "acc_y",
-                (int)msg.data.acc_y
-            );
-
-            historyData.set(
-                "acc_z",
-                (int)msg.data.acc_z
-            );
-
-            historyData.set(
-                "sensor_state",
-                (int)msg.data.sensor_state
-            );
-
-            historyData.set(
-                "battery_lvl",
-                (int)msg.data.battery_lvl
-            );
-
-            historyData.set(
-                "rssi",
-                (int)msg.rssi
-            );
-
-            historyData.set(
-                "timestamp",
-                String(timestamp)
-            );
-
-            bool historySaved =
-                Firebase.RTDB.pushJSON(
-                    &fbdo,
-                    "/history",
-                    &historyData
-                );
-
-            xSemaphoreTake(
-                serialMutex,
-                portMAX_DELAY
-            );
-
-            if (historySaved)
+            if (firebaseReadyFlag)
             {
-                Serial.println(
-                    "[RTDB] Historical reading saved successfully."
-                );
+                scheduleLive();
+                scheduleHistory();
 
-                Serial.print(
-                    "[RTDB] History entry ID: "
-                );
-
-                Serial.println(
-                    fbdo.pushName()
-                );
-            }
-            else
-            {
-                Serial.print(
-                    "[RTDB] History write failed: "
-                );
-
-                Serial.println(
-                    fbdo.errorReason()
-                );
-            }
-
-            xSemaphoreGive(serialMutex);
-        }
-        else
-        {
-            xSemaphoreTake(
-                serialMutex,
-                portMAX_DELAY
-            );
-
-            Serial.println(
-                "[RTDB] History skipped: time not synchronized."
-            );
-
-            xSemaphoreGive(serialMutex);
-        }
-
-        uint16_t currentId =
-            msg.data.node_id;
-
-        int currentState =
-            msg.data.sensor_state;
-
-        if (
-            previousSensorStates.find(currentId) ==
-            previousSensorStates.end()
-        )
-        {
-            previousSensorStates[currentId] = 0;
-        }
-
-        int previousState =
-            previousSensorStates[currentId];
-
-        if (
-            currentState != previousState &&
-            (currentState == 1 || currentState == 2)
-        )
-        {
-            if (
-                millis() - lastAlarmTime > 2000 ||
-                lastAlarmTime == 0
-            )
-            {
-                sendAlarmNotification(
-                    currentState
-                );
-
-                lastAlarmTime = millis();
-            }
-            else
-            {
-                xSemaphoreTake(
-                    serialMutex,
-                    portMAX_DELAY
-                );
-
-                Serial.println(
-                    "[FCM] Notification rejected (<2s)."
-                );
-
-                xSemaphoreGive(serialMutex);
+                if (alarmActive)
+                {
+                    scheduleNotification();
+                }
+                else
+                {
+                    scheduleTokenRead();
+                }
             }
         }
 
-        previousSensorStates[currentId] =
-            currentState;
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }

@@ -2,7 +2,6 @@
 #include <RadioLib.h>
 #include <SPI.h>
 #include <WiFi.h>
-#include <Firebase_ESP_Client.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <map>
@@ -26,10 +25,6 @@
 #define VEXT_PIN 36
 #define LED_PIN 35
 #define CONFIG_BUTTON_PIN 0
-
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
 
 bool firebaseInitialized = false;
 

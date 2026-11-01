@@ -4,7 +4,6 @@
 #include <Arduino.h>
 #include <RadioLib.h>
 #include <WiFi.h>
-#include <Firebase_ESP_Client.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <map>
@@ -16,9 +15,6 @@ struct QueueMessage
     float rssi;
 };
 
-extern FirebaseData fbdo;
-extern FirebaseAuth auth;
-extern FirebaseConfig config;
 extern bool firebaseInitialized;
 
 extern SX1262 radio;

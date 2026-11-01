@@ -324,7 +324,7 @@ void handleConfigStatus()
 
     String wifi = connected ? "connected" : (wifiConnectionFailed ? "failed" : "connecting");
 
-    String firebase = !connected ? "waiting" : (firebaseInitialized && Firebase.ready() ? "ready" : "connecting");
+    String firebase = !connected ? "waiting" : (firebaseServiceReady() ? "ready" : "connecting");
 
     String result = "{\"wifi\":\"";
     result += wifi;
