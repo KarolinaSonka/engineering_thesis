@@ -198,31 +198,46 @@ button {
 <select id="ssid" name="ssid" required>
 )HTML";
 
-    int count = WiFi.scanNetworks();
+    int count = WiFi.scanComplete();
 
-    if (count <= 0)
+    if (count == WIFI_SCAN_FAILED)
     {
-        html += "<option value=''>Nie znaleziono sieci</option>";
+        WiFi.scanNetworks(true);
+        html += "<option value=''>Trwa wyszukiwanie sieci — odśwież listę</option>";
     }
-
-    for (int i = 0; i < count; ++i)
+    else if (count == WIFI_SCAN_RUNNING)
     {
-        String ssid = WiFi.SSID(i);
-        if (ssid.isEmpty())
-            continue;
-
-        String safe = htmlEscape(ssid);
-
-        html += "<option value=\"";
-        html += safe;
-        html += "\">";
-        html += safe;
-        html += " (";
-        html += String(WiFi.RSSI(i));
-        html += " dBm)</option>";
+        html += "<option value=''>Trwa wyszukiwanie sieci — odśwież listę</option>";
     }
+    else
+    {
+        if (count == 0)
+        {
+            html += "<option value=''>Nie znaleziono sieci</option>";
+        }
 
-    WiFi.scanDelete();
+        for (int i = 0; i < count; ++i)
+        {
+            String ssid = WiFi.SSID(i);
+
+            if (ssid.isEmpty())
+            {
+                continue;
+            }
+
+            String safe = htmlEscape(ssid);
+
+            html += "<option value=\"";
+            html += safe;
+            html += "\">";
+            html += safe;
+            html += " (";
+            html += String(WiFi.RSSI(i));
+            html += " dBm)</option>";
+        }
+
+        WiFi.scanDelete();
+    }
 
     html += R"HTML(
 </select>
@@ -418,6 +433,7 @@ void startConfigPortal()
     configServer.send(302, "text/plain", ""); });
 
     configServer.begin();
+    WiFi.scanNetworks(true);
     configPortalActive = true;
 
     Serial.print("[WiFi] Portal: http://");
@@ -499,20 +515,22 @@ bool reconnectToSavedWiFi()
     String passwords[MAX_WIFI_NETWORKS];
 
     int count = loadSavedNetworks(ssids, passwords);
+
     if (count == 0)
+    {
         return false;
+    }
 
     WiFi.mode(WIFI_STA);
-
-    bool visible[MAX_WIFI_NETWORKS] = {};
-    scanSavedNetworks(ssids, count, visible);
 
     for (int step = 0; step < count; step++)
     {
         int i = (reconnectIndex + step) % count;
 
-        if (!visible[i])
+        if (ssids[i].isEmpty())
+        {
             continue;
+        }
 
         reconnectIndex = (i + 1) % count;
 
@@ -520,7 +538,10 @@ bool reconnectToSavedWiFi()
         Serial.println(ssids[i]);
 
         WiFi.disconnect(false, false);
-        WiFi.begin(ssids[i].c_str(), passwords[i].c_str());
+
+        WiFi.begin(
+            ssids[i].c_str(),
+            passwords[i].c_str());
 
         return true;
     }

@@ -81,6 +81,81 @@ void blinkLed(int times)
   }
 }
 
+void processLoRa()
+{
+  if (!receivedFlag)
+  {
+    return;
+  }
+
+  receivedFlag = false;
+
+  uint8_t byteArr[sizeof(LoRaNodeData)];
+
+  int state = radio.readData(
+      byteArr,
+      sizeof(LoRaNodeData));
+
+  if (state == RADIOLIB_ERR_NONE)
+  {
+    if (radio.getPacketLength() == sizeof(LoRaNodeData))
+    {
+      QueueMessage msg;
+
+      memcpy(
+          &msg.data,
+          byteArr,
+          sizeof(LoRaNodeData));
+
+      msg.rssi = radio.getRSSI(false);
+
+      xSemaphoreTake(serialMutex, portMAX_DELAY);
+
+      Serial.println("\n[Radio Task] Correct frame captured");
+
+      Serial.printf(
+          "Node ID: %u, Counter: %u, State: %d\n",
+          msg.data.node_id,
+          msg.data.msg_counter,
+          msg.data.sensor_state);
+
+      xSemaphoreGive(serialMutex);
+
+      if (xQueueSend(loraQueue, &msg, 0) != pdPASS)
+      {
+        xSemaphoreTake(serialMutex, portMAX_DELAY);
+
+        Serial.println(
+            "[Radio Task] ERROR: Queue is full - dropping frame");
+
+        xSemaphoreGive(serialMutex);
+      }
+    }
+    else
+    {
+      Serial.println("[LoRa] Invalid packet length.");
+    }
+  }
+  else
+  {
+    xSemaphoreTake(serialMutex, portMAX_DELAY);
+
+    Serial.print("[LoRa] Packet read failed: ");
+    Serial.println(state);
+
+    xSemaphoreGive(serialMutex);
+  }
+
+  int receiveStatus = radio.startReceive();
+
+  if (receiveStatus != RADIOLIB_ERR_NONE)
+  {
+    Serial.printf(
+        "[LoRa] Receive restart failed: %d\n",
+        receiveStatus);
+  }
+}
+
 void setup()
 {
   pinMode(VEXT_PIN, OUTPUT);
@@ -203,9 +278,10 @@ void setup()
 
 void loop()
 {
+  processLoRa();
+
   if (digitalRead(CONFIG_BUTTON_PIN) == LOW)
   {
-
     if (buttonPressedAt == 0)
     {
       buttonPressedAt = millis();
@@ -214,9 +290,11 @@ void loop()
     if (!buttonHandled &&
         millis() - buttonPressedAt >= 2000)
     {
-
       buttonHandled = true;
-      Serial.println("[WiFi] Manual configuration requested.");
+
+      Serial.println(
+          "[WiFi] Manual configuration requested.");
+
       startConfigPortal();
     }
   }
@@ -226,14 +304,17 @@ void loop()
     buttonHandled = false;
   }
 
+  processLoRa();
+
   if (configPortalActive)
   {
     configServer.handleClient();
   }
 
+  processLoRa();
+
   if (WiFi.status() == WL_CONNECTED)
   {
-
     if (!wifiConnected)
     {
       wifiConnected = true;
@@ -247,7 +328,8 @@ void loop()
       Serial.println(WiFi.localIP());
 
       configTime(
-          0, 0,
+          0,
+          0,
           "pool.ntp.org",
           "time.nist.gov");
 
@@ -258,8 +340,8 @@ void loop()
         closePortalAfterConnection &&
         millis() - wifiConnectedAt >= PORTAL_CLOSE_DELAY)
     {
-
-      Serial.println("[WiFi] Closing configuration portal.");
+      Serial.println(
+          "[WiFi] Closing configuration portal.");
 
       configServer.stop();
       WiFi.softAPdisconnect(true);
@@ -272,7 +354,6 @@ void loop()
   }
   else
   {
-
     if (wifiConnected)
     {
       wifiConnected = false;
@@ -287,12 +368,12 @@ void loop()
         wifiConnectStarted != 0 &&
         millis() - wifiConnectStarted >= WIFI_CONNECT_TIMEOUT)
     {
-
       wifiConnectionFailed = true;
       wifiConnectStarted = 0;
 
       Serial.println("[WiFi] Connection timed out.");
-      Serial.println("[WiFi] Check the password and 2.4 GHz network.");
+      Serial.println(
+          "[WiFi] Check the password and 2.4 GHz network.");
 
       WiFi.disconnect(false, false);
       WiFi.mode(WIFI_AP_STA);
@@ -302,24 +383,24 @@ void loop()
         wifiReconnectInProgress &&
         millis() - wifiReconnectStarted >= WIFI_CONNECT_TIMEOUT)
     {
-
       WiFi.disconnect(false, false);
 
       wifiReconnectInProgress = false;
       wifiReconnectStarted = 0;
       lastWifiRetry = millis();
 
-      Serial.println("[WiFi] Reconnection attempt timed out.");
+      Serial.println(
+          "[WiFi] Reconnection attempt timed out.");
     }
 
     if (!configPortalActive &&
         !wifiReconnectInProgress &&
         millis() - lastWifiRetry >= 10000)
     {
-
       lastWifiRetry = millis();
 
-      Serial.println("[WiFi] Searching for a saved network to reconnect.");
+      Serial.println(
+          "[WiFi] Trying to reconnect to a saved network.");
 
       if (reconnectToSavedWiFi())
       {
@@ -329,69 +410,7 @@ void loop()
     }
   }
 
-  if (receivedFlag)
-  {
-    receivedFlag = false;
-
-    uint8_t byteArr[sizeof(LoRaNodeData)];
-
-    int state = radio.readData(
-        byteArr,
-        sizeof(LoRaNodeData));
-
-    if (state == RADIOLIB_ERR_NONE)
-    {
-      if (radio.getPacketLength() == sizeof(LoRaNodeData))
-      {
-
-        QueueMessage msg;
-
-        memcpy(
-            &msg.data,
-            byteArr,
-            sizeof(LoRaNodeData));
-
-        msg.rssi = radio.getRSSI(false);
-
-        xSemaphoreTake(serialMutex, portMAX_DELAY);
-
-        Serial.println("\n[Radio Task] Correct frame captured");
-
-        Serial.printf(
-            "Node ID: %u, Counter: %u, State: %d\n",
-            msg.data.node_id,
-            msg.data.msg_counter,
-            msg.data.sensor_state);
-
-        xSemaphoreGive(serialMutex);
-
-        if (xQueueSend(
-                loraQueue,
-                &msg,
-                (TickType_t)10) != pdPASS)
-        {
-
-          xSemaphoreTake(serialMutex, portMAX_DELAY);
-
-          Serial.println(
-              "[Radio Task] ERROR: Queue is full - dropping frame");
-
-          xSemaphoreGive(serialMutex);
-        }
-      }
-    }
-    else
-    {
-      xSemaphoreTake(serialMutex, portMAX_DELAY);
-
-      Serial.print("[LoRa] Packet read failed: ");
-      Serial.println(state);
-
-      xSemaphoreGive(serialMutex);
-    }
-
-    radio.startReceive();
-  }
+  processLoRa();
 
   delay(1);
 }
