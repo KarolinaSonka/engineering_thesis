@@ -241,7 +241,7 @@ void setup()
       -1);
 
   int state = radio.begin(
-      868.0,
+      868.3,
       125.0,
       7,
       5,
