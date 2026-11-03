@@ -47,6 +47,11 @@ extern ADC_HandleTypeDef hadc;
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
 #define TASK_TX 									(1 << CFG_SEQ_Task_TX)
+
+#define DUTY_MAGIC       0x44545932UL
+#define DUTY_FACTOR      150UL
+#define DUTY_MAX_TX_MS   2500UL
+#define DUTY_HZ          1024UL
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -66,6 +71,9 @@ static volatile bool tx_finished = false;
 
 static uint32_t next_sleep_seconds = 900;
 static uint32_t next_sleep_stage = LORIOTA_STAGE_PERIODIC;
+
+static volatile bool tx_done_ok = false;
+static bool tx_was_alert = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -170,7 +178,7 @@ void SubghzApp_Init(void) {
 static void OnTxDone(void) {
 	/* USER CODE BEGIN OnTxDone */
 	Radio.Sleep();
-
+	tx_done_ok = true;
 	tx_finished = true;
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	/* USER CODE END OnTxDone */
@@ -186,7 +194,7 @@ static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 static void OnTxTimeout(void) {
 	/* USER CODE BEGIN OnTxTimeout */
 	Radio.Sleep();
-
+	tx_done_ok = true;
 	tx_finished = true;
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	/* USER CODE END OnTxTimeout */
@@ -205,6 +213,33 @@ static void OnRxError(void) {
 }
 
 /* USER CODE BEGIN PrFD */
+static uint32_t DutyNow(void) {
+	uint32_t ssr = RTC->SSR;
+	(void) RTC->DR;  // Release RTC shadow registers
+	return ~ssr;
+}
+
+static uint32_t DutyWaitSeconds(void) {
+	uint32_t now = DutyNow();
+
+	if (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR15) != DUTY_MAGIC) {
+		HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR13, 0);
+		HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR14, now);
+		HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR15, DUTY_MAGIC);
+		return 0;
+	}
+
+	int32_t remaining =
+			(int32_t) (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR14) - now);
+
+	return remaining > 0 ? ((uint32_t) remaining + DUTY_HZ - 1) / DUTY_HZ : 0;
+}
+
+static void DutyReserve(uint32_t airtime_ms) {
+	uint32_t ticks = (airtime_ms * DUTY_FACTOR * DUTY_HZ + 999UL) / 1000UL;
+
+	HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR14, DutyNow() + ticks);
+}
 
 static void ADXL345_ClearInterrupt(void) {
 	uint8_t int_source = 0;
@@ -313,6 +348,17 @@ void Loriota_EnterShutdown(uint32_t seconds, uint32_t next_stage) {
 }
 
 void Master_Radio_Send(void) {
+	uint32_t wait = DutyWaitSeconds();
+
+	if (loriota_wake_reason == LORIOTA_WAKE_ACCEL) {
+		HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR13, 1);
+	}
+
+	if (wait > 0) {
+		Loriota_EnterShutdown(wait + 1, LORIOTA_STAGE_PERIODIC);
+		return;
+	}
+
 	LoRaNodeData frame = { 0 };
 
 	frame.node_id = MY_NODE_ID;
@@ -345,7 +391,8 @@ void Master_Radio_Send(void) {
 	// read accelerometer
 	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
 
-	if (loriota_wake_reason == LORIOTA_WAKE_ACCEL) {
+	if (loriota_wake_reason == LORIOTA_WAKE_ACCEL
+			|| HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR13) != 0) {
 		// vibration detected
 		frame.sensor_state = 2;
 
@@ -370,12 +417,34 @@ void Master_Radio_Send(void) {
 	GPIOB,
 	GPIO_PIN_5, GPIO_PIN_SET);
 
+	uint32_t airtime = Radio.TimeOnAir(MODEM_LORA,
+	LORA_BANDWIDTH,
+	LORA_SPREADING_FACTOR,
+	LORA_CODINGRATE,
+	LORA_PREAMBLE_LENGTH,
+	LORA_FIX_LENGTH_PAYLOAD_ON, (uint8_t) sizeof(LoRaNodeData),
+	true);
+
+	if (airtime == 0 || airtime > DUTY_MAX_TX_MS) {
+		Loriota_EnterShutdown(900, LORIOTA_STAGE_PERIODIC);
+		return;
+	}
+
+	tx_was_alert = (frame.sensor_state == 2);
+	tx_done_ok = false;
+
+	DutyReserve(airtime);
+
 	Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 }
 
 static void TxProcess(void) {
 	if (tx_finished) {
 		tx_finished = false;
+
+		if (tx_done_ok && tx_was_alert) {
+			HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR13, 0);
+		}
 
 		Loriota_EnterShutdown(next_sleep_seconds, next_sleep_stage);
 	} else {
