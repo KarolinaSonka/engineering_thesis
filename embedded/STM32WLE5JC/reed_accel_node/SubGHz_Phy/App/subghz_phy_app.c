@@ -50,20 +50,25 @@ extern ADC_HandleTypeDef hadc;
 #define LORIOTA_COOLDOWN_SECONDS   10UL
 #define LORIOTA_REPORT_SECONDS     900UL
 
+#define DUTY_MAGIC              0x44545943UL
+#define DUTY_PREVIOUS_MAGIC     0x44545933UL
 
-#define DUTY_MAGIC       0x44545933UL
-#define DUTY_FACTOR      150UL
-#define DUTY_MAX_TX_MS   2500UL
-#define DUTY_HZ          1024UL
+#define DUTY_MAX_TX_MS          2500UL
+#define DUTY_TX_TIMEOUT_MS      3000UL
 
-#define DUTY_EVT_OPEN    (1UL << 0)
-#define DUTY_EVT_VIB     (1UL << 1)
-#define DUTY_EVT_STATE   (1UL << 2)
-#define DUTY_EVT_REPORT  (1UL << 3)
+#define DUTY_HZ                 1024UL
+#define DUTY_MAX_CREDIT_TICKS   6144L
+#define DUTY_REFILL_DIV         172UL
 
-#define DUTY_BKP_FLAGS    RTC_BKP_DR13
-#define DUTY_BKP_DEADLINE RTC_BKP_DR14
-#define DUTY_BKP_MAGIC    RTC_BKP_DR15
+#define DUTY_EVT_OPEN           (1UL << 0)
+#define DUTY_EVT_VIB            (1UL << 1)
+#define DUTY_EVT_STATE          (1UL << 2)
+#define DUTY_EVT_REPORT         (1UL << 3)
+
+#define DUTY_BKP_LAST           RTC_BKP_DR12
+#define DUTY_BKP_FLAGS          RTC_BKP_DR13
+#define DUTY_BKP_CREDITS        RTC_BKP_DR14
+#define DUTY_BKP_MAGIC          RTC_BKP_DR15
 
 /* USER CODE END PD */
 
@@ -86,8 +91,9 @@ static uint32_t next_sleep_seconds = LORIOTA_REPORT_SECONDS;
 static uint32_t next_sleep_stage = LORIOTA_STAGE_PERIODIC;
 
 static uint8_t reed_state_in_flight = 0xFF;
-
 static uint32_t duty_event_in_flight = 0;
+static volatile bool tx_done_ok = false;
+static uint32_t tx_airtime_ticks = 0;
 
 /* USER CODE END PV */
 
@@ -98,27 +104,28 @@ static uint32_t duty_event_in_flight = 0;
 static void OnTxDone(void);
 
 /**
-  * @brief Function to be executed on Radio Rx Done event
-  * @param  payload ptr of buffer received
-  * @param  size buffer size
-  * @param  rssi
-  * @param  LoraSnr_FskCfo
-  */
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
+ * @brief Function to be executed on Radio Rx Done event
+ * @param  payload ptr of buffer received
+ * @param  size buffer size
+ * @param  rssi
+ * @param  LoraSnr_FskCfo
+ */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
+		int8_t LoraSnr_FskCfo);
 
 /**
-  * @brief Function executed on Radio Tx Timeout event
-  */
+ * @brief Function executed on Radio Tx Timeout event
+ */
 static void OnTxTimeout(void);
 
 /**
-  * @brief Function executed on Radio Rx Timeout event
-  */
+ * @brief Function executed on Radio Rx Timeout event
+ */
 static void OnRxTimeout(void);
 
 /**
-  * @brief Function executed on Radio Rx Error event
-  */
+ * @brief Function executed on Radio Rx Error event
+ */
 static void OnRxError(void);
 
 /* USER CODE BEGIN PFP */
@@ -131,29 +138,31 @@ extern bool Loriota_ReedChangedSinceLastTx(void);
 extern void Loriota_SaveReedState(uint8_t state);
 
 static void DutyInit(void);
+static void DutyUpdate(void);
 static uint32_t DutyGetFlags(void);
 static void DutySetFlags(uint32_t flags);
-static uint32_t DutyWaitSeconds(void);
-static void DutyReserve(uint32_t airtime_ms);
+static uint32_t DutyAirtimeMs(void);
+static uint32_t DutyWaitSeconds(uint32_t airtime_ms);
+static bool DutyReserve(uint32_t airtime_ms);
+static void DutyChargeTimeout(void);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
-void SubghzApp_Init(void)
-{
-  /* USER CODE BEGIN SubghzApp_Init_1 */
+void SubghzApp_Init(void) {
+	/* USER CODE BEGIN SubghzApp_Init_1 */
 
-  /* USER CODE END SubghzApp_Init_1 */
+	/* USER CODE END SubghzApp_Init_1 */
 
-  /* Radio initialization */
-  RadioEvents.TxDone = OnTxDone;
-  RadioEvents.RxDone = OnRxDone;
-  RadioEvents.TxTimeout = OnTxTimeout;
-  RadioEvents.RxTimeout = OnRxTimeout;
-  RadioEvents.RxError = OnRxError;
+	/* Radio initialization */
+	RadioEvents.TxDone = OnTxDone;
+	RadioEvents.RxDone = OnRxDone;
+	RadioEvents.TxTimeout = OnTxTimeout;
+	RadioEvents.RxTimeout = OnRxTimeout;
+	RadioEvents.RxError = OnRxError;
 
-  Radio.Init(&RadioEvents);
+	Radio.Init(&RadioEvents);
 
-  /* USER CODE BEGIN SubghzApp_Init_2 */
+	/* USER CODE BEGIN SubghzApp_Init_2 */
 
 	Radio.SetChannel(RF_FREQUENCY);
 	Radio.SetTxConfig(MODEM_LORA,
@@ -190,7 +199,7 @@ void SubghzApp_Init(void)
 	if (loriota_wake_reason != LORIOTA_WAKE_UNEXPECTED) {
 		UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 	}
-  /* USER CODE END SubghzApp_Init_2 */
+	/* USER CODE END SubghzApp_Init_2 */
 }
 
 /* USER CODE BEGIN EF */
@@ -198,49 +207,43 @@ void SubghzApp_Init(void)
 /* USER CODE END EF */
 
 /* Private functions ---------------------------------------------------------*/
-static void OnTxDone(void)
-{
-  /* USER CODE BEGIN OnTxDone */
+static void OnTxDone(void) {
+	/* USER CODE BEGIN OnTxDone */
 	Radio.Sleep();
+	tx_done_ok = true;
+	uint32_t flags = DutyGetFlags() & ~duty_event_in_flight;
 
-	    uint32_t flags = DutyGetFlags() & ~duty_event_in_flight;
+	if (reed_state_in_flight != 0xFF) {
+		Loriota_SaveReedState(reed_state_in_flight);
 
-	    if (reed_state_in_flight != 0xFF)
-	    {
-	        Loriota_SaveReedState(reed_state_in_flight);
+		uint8_t current_reed = Loriota_GetReedState();
 
-	        uint8_t current_reed = Loriota_GetReedState();
+		if (current_reed != reed_state_in_flight) {
+			flags |= (current_reed == 0U) ? DUTY_EVT_STATE : DUTY_EVT_OPEN;
+		}
 
-	        if (current_reed != reed_state_in_flight)
-	        {
-	            flags |= (current_reed == 0U)
-	                   ? DUTY_EVT_STATE
-	                   : DUTY_EVT_OPEN;
-	        }
+		reed_state_in_flight = 0xFF;
+	}
 
-	        reed_state_in_flight = 0xFF;
-	    }
-
-	    DutySetFlags(flags);
-	    duty_event_in_flight = 0;
-
-	    tx_finished = true;
-	    UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-  /* USER CODE END OnTxDone */
+	DutySetFlags(flags);
+	duty_event_in_flight = 0;
+	tx_airtime_ticks = 0;
+	tx_finished = true;
+	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
+	/* USER CODE END OnTxDone */
 }
 
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
-{
-  /* USER CODE BEGIN OnRxDone */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
+		int8_t LoraSnr_FskCfo) {
+	/* USER CODE BEGIN OnRxDone */
 	Radio.Sleep();
-  /* USER CODE END OnRxDone */
+	/* USER CODE END OnRxDone */
 }
 
-static void OnTxTimeout(void)
-{
-  /* USER CODE BEGIN OnTxTimeout */
+static void OnTxTimeout(void) {
+	/* USER CODE BEGIN OnTxTimeout */
 	Radio.Sleep();
-	DutyReserve(3000UL);
+	tx_done_ok = false;
 
 	reed_state_in_flight = 0xFF;
 
@@ -248,82 +251,157 @@ static void OnTxTimeout(void)
 
 	tx_finished = true;
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-  /* USER CODE END OnTxTimeout */
+	/* USER CODE END OnTxTimeout */
 }
 
-static void OnRxTimeout(void)
-{
-  /* USER CODE BEGIN OnRxTimeout */
+static void OnRxTimeout(void) {
+	/* USER CODE BEGIN OnRxTimeout */
 	Radio.Sleep();
-  /* USER CODE END OnRxTimeout */
+	/* USER CODE END OnRxTimeout */
 }
 
-static void OnRxError(void)
-{
-  /* USER CODE BEGIN OnRxError */
+static void OnRxError(void) {
+	/* USER CODE BEGIN OnRxError */
 	Radio.Sleep();
-  /* USER CODE END OnRxError */
+	/* USER CODE END OnRxError */
 }
 
 /* USER CODE BEGIN PrFD */
+static uint32_t DutyNow(void) {
+	uint32_t ssr = RTC->SSR;
 
-static uint32_t DutyNow(void)
-{
-    uint32_t ssr = RTC->SSR;
-    (void)RTC->DR;
-    return ~ssr;
+	(void) RTC->DR;
+
+	return ~ssr;
 }
 
-static uint32_t DutyGetFlags(void)
-{
-    return HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_FLAGS);
+static uint32_t DutyAirtimeTicks(uint32_t airtime_ms) {
+	return (uint32_t) (((uint64_t) airtime_ms * DUTY_HZ + 999ULL) / 1000ULL);
 }
 
-static void DutySetFlags(uint32_t flags)
-{
-    HAL_RTCEx_BKUPWrite(&hrtc, DUTY_BKP_FLAGS, flags);
+static uint32_t DutyGetFlags(void) {
+	return HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_FLAGS);
 }
 
-static void DutyInit(void)
-{
-    if (HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_MAGIC) != DUTY_MAGIC)
-    {
-        DutySetFlags(0);
-
-        HAL_RTCEx_BKUPWrite(
-            &hrtc, DUTY_BKP_DEADLINE, DutyNow());
-
-        HAL_RTCEx_BKUPWrite(
-            &hrtc, DUTY_BKP_MAGIC, DUTY_MAGIC);
-    }
+static void DutySetFlags(uint32_t flags) {
+	HAL_RTCEx_BKUPWrite(&hrtc, DUTY_BKP_FLAGS, flags);
 }
 
-static uint32_t DutyWaitSeconds(void)
-{
-    uint32_t now = DutyNow();
-    uint32_t deadline = HAL_RTCEx_BKUPRead(
-        &hrtc, DUTY_BKP_DEADLINE);
+static void DutyInit(void) {
+	HAL_PWR_EnableBkUpAccess();
 
-    int32_t remaining = (int32_t)(deadline - now);
+	uint32_t previous_magic = HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_MAGIC);
 
-    if (remaining <= 0)
-        return 0;
+	if (previous_magic != DUTY_MAGIC) {
+		uint32_t flags = 0UL;
 
-    return ((uint32_t)remaining + DUTY_HZ - 1UL) / DUTY_HZ;
+		if (previous_magic == DUTY_PREVIOUS_MAGIC) {
+			flags = DutyGetFlags() & (DUTY_EVT_OPEN |
+			DUTY_EVT_VIB |
+			DUTY_EVT_STATE |
+			DUTY_EVT_REPORT);
+		}
+
+		DutySetFlags(flags);
+
+		HAL_RTCEx_BKUPWrite(&hrtc,
+		DUTY_BKP_CREDITS, (uint32_t) DUTY_MAX_CREDIT_TICKS);
+
+		HAL_RTCEx_BKUPWrite(&hrtc, DUTY_BKP_LAST, DutyNow());
+
+		HAL_RTCEx_BKUPWrite(&hrtc, DUTY_BKP_MAGIC, DUTY_MAGIC);
+	}
 }
 
-static void DutyReserve(uint32_t airtime_ms)
-{
-    uint32_t ticks = (uint32_t)(
-        ((uint64_t)airtime_ms * DUTY_FACTOR * DUTY_HZ
-         + 999ULL) / 1000ULL);
+static void DutyUpdate(void) {
+	uint32_t now = DutyNow();
 
-    HAL_RTCEx_BKUPWrite(
-        &hrtc,
-        DUTY_BKP_DEADLINE,
-        DutyNow() + ticks);
+	uint32_t last = HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_LAST);
+
+	uint32_t elapsed = now - last;
+
+	uint32_t refill = elapsed / DUTY_REFILL_DIV;
+
+	if (refill == 0UL) {
+		return;
+	}
+
+	int32_t credits = (int32_t) HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_CREDITS);
+
+	int64_t updated = (int64_t) credits + refill;
+
+	if (updated > DUTY_MAX_CREDIT_TICKS) {
+		updated = DUTY_MAX_CREDIT_TICKS;
+	}
+
+	HAL_RTCEx_BKUPWrite(&hrtc,
+	DUTY_BKP_CREDITS, (uint32_t) (int32_t) updated);
+
+	HAL_RTCEx_BKUPWrite(&hrtc,
+	DUTY_BKP_LAST, last + refill * DUTY_REFILL_DIV);
 }
 
+static uint32_t DutyWaitSeconds(uint32_t airtime_ms) {
+	DutyUpdate();
+
+	int32_t credits = (int32_t) HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_CREDITS);
+
+	int64_t missing = (int64_t) DutyAirtimeTicks(airtime_ms) - credits;
+
+	if (missing <= 0) {
+		return 0UL;
+	}
+
+	uint64_t wait_ticks = (uint64_t) missing * DUTY_REFILL_DIV;
+
+	return (uint32_t) ((wait_ticks + DUTY_HZ - 1UL) / DUTY_HZ);
+}
+
+static bool DutyReserve(uint32_t airtime_ms) {
+	DutyUpdate();
+
+	int32_t credits = (int32_t) HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_CREDITS);
+
+	uint32_t required = DutyAirtimeTicks(airtime_ms);
+
+	if (credits < (int32_t) required) {
+		return false;
+	}
+
+	HAL_RTCEx_BKUPWrite(&hrtc,
+	DUTY_BKP_CREDITS, (uint32_t) (credits - (int32_t) required));
+
+	tx_airtime_ticks = required;
+
+	return true;
+}
+
+static void DutyChargeTimeout(void) {
+	DutyUpdate();
+
+	uint32_t timeout_ticks = DutyAirtimeTicks(DUTY_TX_TIMEOUT_MS);
+
+	if (timeout_ticks > tx_airtime_ticks) {
+		int32_t credits = (int32_t) HAL_RTCEx_BKUPRead(&hrtc, DUTY_BKP_CREDITS);
+
+		credits -= (int32_t) (timeout_ticks - tx_airtime_ticks);
+
+		HAL_RTCEx_BKUPWrite(&hrtc,
+		DUTY_BKP_CREDITS, (uint32_t) credits);
+	}
+
+	tx_airtime_ticks = 0;
+}
+
+static uint32_t DutyAirtimeMs(void) {
+	return Radio.TimeOnAir(MODEM_LORA,
+	LORA_BANDWIDTH,
+	LORA_SPREADING_FACTOR,
+	LORA_CODINGRATE,
+	LORA_PREAMBLE_LENGTH,
+	LORA_FIX_LENGTH_PAYLOAD_ON, (uint8_t) sizeof(LoRaNodeData),
+	true);
+}
 
 static void ADXL345_ClearInterrupt(void) {
 	uint8_t int_source = 0;
@@ -440,11 +518,9 @@ void Loriota_EnterShutdown(uint32_t seconds, uint32_t next_stage) {
 
 	HAL_PWR_EnableBkUpAccess();
 
-	HAL_RTCEx_BKUPWrite(
-	    &hrtc,
-	    RTC_BKP_DR16,
-	    LORIOTA_SHUTDOWN_ARMED
-	);
+	HAL_RTCEx_BKUPWrite(&hrtc,
+	RTC_BKP_DR16,
+	LORIOTA_SHUTDOWN_ARMED);
 
 	HAL_NVIC_DisableIRQ(TIM17_IRQn);
 	HAL_NVIC_ClearPendingIRQ(TIM17_IRQn);
@@ -459,225 +535,201 @@ void Loriota_EnterShutdown(uint32_t seconds, uint32_t next_stage) {
 	Error_Handler();
 }
 
+void Master_Radio_Send(void) {
+	uint32_t airtime = DutyAirtimeMs();
 
-void Master_Radio_Send(void)
-{
-    uint32_t airtime = Radio.TimeOnAir(
-        MODEM_LORA,
-        LORA_BANDWIDTH,
-        LORA_SPREADING_FACTOR,
-        LORA_CODINGRATE,
-        LORA_PREAMBLE_LENGTH,
-        LORA_FIX_LENGTH_PAYLOAD_ON,
-        (uint8_t)sizeof(LoRaNodeData),
-        true
-    );
+	if (airtime == 0UL || airtime > DUTY_MAX_TX_MS) {
+		Loriota_EnterShutdown(
+		LORIOTA_REPORT_SECONDS,
+		LORIOTA_STAGE_PERIODIC);
+		return;
+	}
 
-    if (airtime == 0UL || airtime > DUTY_MAX_TX_MS)
-    {
-        Loriota_EnterShutdown(
-            LORIOTA_REPORT_SECONDS,
-            LORIOTA_STAGE_PERIODIC);
-        return;
-    }
+	LoRaNodeData frame = { 0 };
 
-    LoRaNodeData frame = { 0 };
+	frame.node_id = MY_NODE_ID;
+	frame.node_type = 1;
 
-    frame.node_id = MY_NODE_ID;
-    frame.node_type = 1;
+	HAL_ADC_Start(&hadc);
 
-    HAL_ADC_Start(&hadc);
+	if (HAL_ADC_PollForConversion(&hadc, 100) == HAL_OK) {
+		uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
 
-    if (HAL_ADC_PollForConversion(&hadc, 100) == HAL_OK)
-    {
-        uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
+		uint32_t supply_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
+				ADC_RESOLUTION_12B);
 
-        uint32_t supply_mV =
-            __HAL_ADC_CALC_VREFANALOG_VOLTAGE(
-                raw_adc, ADC_RESOLUTION_12B);
+		int32_t bat_percent = ((int32_t) supply_mV - 2200) * 100 / 800;
 
-        int32_t bat_percent =
-            ((int32_t)supply_mV - 2200) * 100 / 800;
+		if (bat_percent > 100)
+			bat_percent = 100;
 
-        if (bat_percent > 100)
-            bat_percent = 100;
+		if (bat_percent < 0)
+			bat_percent = 0;
 
-        if (bat_percent < 0)
-            bat_percent = 0;
+		frame.battery_lvl = (uint8_t) bat_percent;
+	} else {
+		frame.battery_lvl = 0;
+	}
 
-        frame.battery_lvl = (uint8_t)bat_percent;
-    }
-    else
-    {
-        frame.battery_lvl = 0;
-    }
+	HAL_ADC_Stop(&hadc);
 
-    HAL_ADC_Stop(&hadc);
+	Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
 
-    Read_ADXL345(&frame.acc_x, &frame.acc_y, &frame.acc_z);
+	uint8_t reed_state = Loriota_GetReedState();
+	uint32_t flags = DutyGetFlags();
 
-    uint8_t reed_state = Loriota_GetReedState();
-    uint32_t flags = DutyGetFlags();
+	if (flags & DUTY_EVT_OPEN) {
+		frame.sensor_state = 1;
+		duty_event_in_flight = DUTY_EVT_OPEN;
+	} else if (flags & DUTY_EVT_VIB) {
+		frame.sensor_state = 2;
+		duty_event_in_flight = DUTY_EVT_VIB;
+	} else {
+		frame.sensor_state = reed_state;
 
-    if (flags & DUTY_EVT_OPEN)
-    {
-        frame.sensor_state = 1;
-        duty_event_in_flight = DUTY_EVT_OPEN;
-    }
-    else if (flags & DUTY_EVT_VIB)
-    {
-        frame.sensor_state = 2;
-        duty_event_in_flight = DUTY_EVT_VIB;
-    }
-    else
-    {
-        frame.sensor_state = reed_state;
+		duty_event_in_flight =
+				(flags & DUTY_EVT_STATE) ? DUTY_EVT_STATE : DUTY_EVT_REPORT;
+	}
 
-        duty_event_in_flight =
-            (flags & DUTY_EVT_STATE)
-            ? DUTY_EVT_STATE
-            : DUTY_EVT_REPORT;
-    }
+	if (frame.sensor_state == 2) {
+		next_sleep_seconds = LORIOTA_COOLDOWN_SECONDS;
+		next_sleep_stage = LORIOTA_STAGE_COOLDOWN;
+	} else {
+		next_sleep_seconds = LORIOTA_REPORT_SECONDS;
+		next_sleep_stage = LORIOTA_STAGE_PERIODIC;
+	}
 
-    if (frame.sensor_state == 2)
-    {
-        next_sleep_seconds = LORIOTA_COOLDOWN_SECONDS;
-        next_sleep_stage = LORIOTA_STAGE_COOLDOWN;
-    }
-    else
-    {
-        next_sleep_seconds = LORIOTA_REPORT_SECONDS;
-        next_sleep_stage = LORIOTA_STAGE_PERIODIC;
-    }
+	if (!DutyReserve(airtime)) {
+		uint32_t wait = DutyWaitSeconds(airtime);
 
-    frame.msg_counter = global_msg_counter++;
+		Loriota_EnterShutdown(wait + 1UL,
+		LORIOTA_STAGE_PERIODIC);
 
-    HAL_RTCEx_BKUPWrite(
-        &hrtc, RTC_BKP_DR19, global_msg_counter);
+		return;
+	}
 
-    reed_state_in_flight =
-        (frame.sensor_state == 1U) ? 1U : reed_state;
+	frame.msg_counter = global_msg_counter++;
+	HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR19, global_msg_counter);
+	reed_state_in_flight = (frame.sensor_state == 1U) ? 1U : reed_state;
 
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+	tx_done_ok = false;
 
-    DutyReserve(airtime);
-
-    Radio.Send((uint8_t*)&frame, sizeof(LoRaNodeData));
+	Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 }
 
+static void TxProcess(void) {
+	if (tx_finished) {
+		tx_finished = false;
 
+		if (tx_done_ok) {
+			uint32_t flags = DutyGetFlags();
 
-static void TxProcess(void)
-{
-    if (tx_finished)
-    {
-        tx_finished = false;
+			if (flags != 0UL) {
+				uint32_t airtime = DutyAirtimeMs();
 
-        uint32_t flags = DutyGetFlags();
+				uint32_t wait =
+						(airtime == 0UL || airtime > DUTY_MAX_TX_MS) ?
+								LORIOTA_REPORT_SECONDS :
+								DutyWaitSeconds(airtime);
 
-        if (flags != 0UL)
-        {
-            uint32_t wait = DutyWaitSeconds();
+				if (next_sleep_stage == LORIOTA_STAGE_COOLDOWN
+						&& wait < LORIOTA_COOLDOWN_SECONDS) {
+					wait = LORIOTA_COOLDOWN_SECONDS;
+				}
 
-            if (next_sleep_stage == LORIOTA_STAGE_COOLDOWN &&
-                wait < LORIOTA_COOLDOWN_SECONDS)
-            {
-                wait = LORIOTA_COOLDOWN_SECONDS;
-            }
+				Loriota_EnterShutdown(wait + 1UL,
+				LORIOTA_STAGE_PERIODIC);
+			} else {
+				Loriota_EnterShutdown(next_sleep_seconds, next_sleep_stage);
+			}
+		} else {
+			DutyChargeTimeout();
 
-            Loriota_EnterShutdown(
-                wait + 1UL,
-                LORIOTA_STAGE_PERIODIC);
-        }
-        else
-        {
-            Loriota_EnterShutdown(
-                next_sleep_seconds,
-                next_sleep_stage);
-        }
+			uint32_t airtime = DutyAirtimeMs();
 
-        return;
-    }
+			uint32_t wait =
+					(airtime == 0UL || airtime > DUTY_MAX_TX_MS) ?
+							LORIOTA_REPORT_SECONDS : DutyWaitSeconds(airtime);
 
-    uint8_t reed_state = Loriota_GetReedState();
-    bool changed = Loriota_ReedChangedSinceLastTx();
+			if (wait < LORIOTA_COOLDOWN_SECONDS) {
+				wait = LORIOTA_COOLDOWN_SECONDS;
+			}
 
-    uint32_t flags = DutyGetFlags();
+			Loriota_EnterShutdown(wait + 1UL,
+			LORIOTA_STAGE_PERIODIC);
+		}
 
-    if (loriota_wake_reason == LORIOTA_WAKE_REED)
-    {
-        if (changed)
-        {
-            flags |= (reed_state == 0U)
-                   ? DUTY_EVT_STATE
-                   : DUTY_EVT_OPEN;
-        }
-    }
-    else if (loriota_wake_reason == LORIOTA_WAKE_ACCEL)
-    {
-        if (reed_state == 0U)
-        {
-            flags |= DUTY_EVT_VIB;
-        }
-        else if (changed)
-        {
-            flags |= DUTY_EVT_OPEN;
-        }
-    }
-    else if (flags == 0UL)
-    {
-        flags |= DUTY_EVT_REPORT;
-    }
+		return;
+	}
 
-    if ((flags & DUTY_EVT_OPEN) && reed_state == 0U)
-    {
-        flags |= DUTY_EVT_STATE;
-    }
+	uint8_t reed_state = Loriota_GetReedState();
+	bool changed = Loriota_ReedChangedSinceLastTx();
 
-    DutySetFlags(flags);
+	uint32_t flags = DutyGetFlags();
 
-    if (flags == 0UL)
-    {
-        if (loriota_wake_reason == LORIOTA_WAKE_REED)
-        {
-            uint32_t stage = HAL_RTCEx_BKUPRead(
-                &hrtc, RTC_BKP_DR18);
+	if (loriota_wake_reason == LORIOTA_WAKE_REED) {
+		if (changed) {
+			flags |= (reed_state == 0U) ? DUTY_EVT_STATE : DUTY_EVT_OPEN;
+		}
+	} else if (loriota_wake_reason == LORIOTA_WAKE_ACCEL) {
+		if (reed_state == 0U) {
+			flags |= DUTY_EVT_VIB;
+		} else if (changed) {
+			flags |= DUTY_EVT_OPEN;
+		}
+	} else if (flags == 0UL) {
+		flags |= DUTY_EVT_REPORT;
+	}
 
-            if (stage == LORIOTA_STAGE_COOLDOWN)
-            {
-                Loriota_EnterShutdown(
-                    LORIOTA_COOLDOWN_SECONDS,
-                    LORIOTA_STAGE_COOLDOWN);
-            }
-            else
-            {
-                Loriota_EnterShutdown(
-                    LORIOTA_REPORT_SECONDS,
-                    LORIOTA_STAGE_PERIODIC);
-            }
-        }
-        else
-        {
-            Loriota_EnterShutdown(
-                LORIOTA_REPORT_SECONDS,
-                LORIOTA_STAGE_PERIODIC);
-        }
+	if ((flags & DUTY_EVT_OPEN) && reed_state == 0U) {
+		flags |= DUTY_EVT_STATE;
+	}
 
-        return;
-    }
+	DutySetFlags(flags);
 
-    uint32_t wait = DutyWaitSeconds();
+	if (flags == 0UL) {
+		if (loriota_wake_reason == LORIOTA_WAKE_REED) {
+			uint32_t stage = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR18);
 
-    if (wait > 0UL)
-    {
-        Loriota_EnterShutdown(
-            wait + 1UL,
-            LORIOTA_STAGE_PERIODIC);
-        return;
-    }
+			if (stage == LORIOTA_STAGE_COOLDOWN) {
+				Loriota_EnterShutdown(
+				LORIOTA_COOLDOWN_SECONDS,
+				LORIOTA_STAGE_COOLDOWN);
+			} else {
+				Loriota_EnterShutdown(
+				LORIOTA_REPORT_SECONDS,
+				LORIOTA_STAGE_PERIODIC);
+			}
+		} else {
+			Loriota_EnterShutdown(
+			LORIOTA_REPORT_SECONDS,
+			LORIOTA_STAGE_PERIODIC);
+		}
 
-    Master_Radio_Send();
+		return;
+	}
+
+	uint32_t airtime = DutyAirtimeMs();
+
+	if (airtime == 0UL || airtime > DUTY_MAX_TX_MS)
+	{
+	    Loriota_EnterShutdown(
+	        LORIOTA_REPORT_SECONDS,
+	        LORIOTA_STAGE_PERIODIC);
+
+	    return;
+	}
+
+	uint32_t wait = DutyWaitSeconds(airtime);
+
+	if (wait > 0UL) {
+		Loriota_EnterShutdown(wait + 1UL,
+		LORIOTA_STAGE_PERIODIC);
+		return;
+	}
+
+	Master_Radio_Send();
 }
-
 
 /* USER CODE END PrFD */
