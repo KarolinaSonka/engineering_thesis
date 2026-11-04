@@ -34,6 +34,8 @@ namespace
     constexpr size_t MAX_HISTORY_QUEUE = 64;
     constexpr size_t MAX_ALARM_QUEUE = 32;
     constexpr uint32_t RETRY_DELAY_MS = 2000;
+    constexpr uint32_t HISTORY_TIMEOUT_MS = 30000;
+    constexpr uint32_t HISTORY_RECOVERY_LOG_MS = 10000;
 
     constexpr const char *DATABASE_URL =
         "https://loriota-8d71a-default-rtdb.europe-west1.firebasedatabase.app/";
@@ -74,6 +76,7 @@ namespace
 
     bool liveInFlight = false;
     bool historyInFlight = false;
+    bool historyRecovering = false;
     bool tokenReadInFlight = false;
     bool notificationInFlight = false;
     bool alarmActive = false;
@@ -86,6 +89,7 @@ namespace
 
     uint32_t liveStarted = 0;
     uint32_t historyStarted = 0;
+    uint32_t lastHistoryRecoveryLog = 0;
     uint32_t alarmStarted = 0;
 
     uint32_t nextLiveRetry = 0;
@@ -331,8 +335,22 @@ namespace
         if (result.isError())
         {
             logMessage(
-                "[RTDB] History write failed: " +
+                "[RTDB] History write failed. Code: " +
+                String(result.error().code()) +
+                ", reason: " +
                 result.error().message());
+
+            logMessage(
+                "[RTDB] History client tasks: " +
+                String(historyClient.taskCount()));
+
+            logMessage(
+                "[RTDB] Pending records: " +
+                String(pendingHistory.size()));
+
+            logMessage(
+                "[RTDB] Free heap: " +
+                String(ESP.getFreeHeap()) + " bytes");
 
             nextHistoryRetry = millis() + RETRY_DELAY_MS;
         }
@@ -637,6 +655,7 @@ namespace
     void scheduleHistory()
     {
         if (historyInFlight ||
+            historyRecovering ||
             pendingHistory.empty() ||
             !due(nextHistoryRetry))
         {
@@ -666,6 +685,73 @@ namespace
             object_t(json),
             onHistoryResult,
             "history");
+    }
+
+    void checkHistoryWatchdog()
+    {
+        uint32_t now = millis();
+
+        if (historyRecovering)
+        {
+            size_t tasks = historyClient.taskCount();
+
+            if (tasks == 0)
+            {
+                historyRecovering = false;
+                historyInFlight = false;
+                nextHistoryRetry = now + RETRY_DELAY_MS;
+
+                logMessage(
+                    "[RTDB] History client recovered. Retry scheduled.");
+
+                return;
+            }
+
+            if ((uint32_t)(now - lastHistoryRecoveryLog) >=
+                HISTORY_RECOVERY_LOG_MS)
+            {
+                lastHistoryRecoveryLog = now;
+
+                logMessage(
+                    "[RTDB] Waiting for history client cleanup. Tasks: " +
+                    String(tasks));
+            }
+
+            return;
+        }
+
+        if (!historyInFlight)
+        {
+            return;
+        }
+
+        uint32_t elapsed = now - historyStarted;
+
+        if (elapsed < HISTORY_TIMEOUT_MS)
+        {
+            return;
+        }
+
+        logMessage(
+            "[RTDB] History watchdog timeout after " +
+            String(elapsed) + " ms");
+
+        logMessage(
+            "[RTDB] History client tasks: " +
+            String(historyClient.taskCount()));
+
+        logMessage(
+            "[RTDB] Pending history records: " +
+            String(pendingHistory.size()));
+
+        logMessage(
+            "[RTDB] Free heap: " +
+            String(ESP.getFreeHeap()) + " bytes");
+
+        historyRecovering = true;
+        lastHistoryRecoveryLog = now;
+
+        historyClient.stopAsync(true);
     }
 
     void scheduleTokenRead()
@@ -798,6 +884,8 @@ void firebaseTask(void *pvParameters)
         if (firebaseInitialized)
         {
             firebaseApp.loop();
+
+            checkHistoryWatchdog();
 
             firebaseReadyFlag = firebaseApp.ready();
 
