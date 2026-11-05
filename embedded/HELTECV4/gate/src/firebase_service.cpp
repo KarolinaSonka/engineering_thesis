@@ -18,6 +18,8 @@
 
 namespace
 {
+    extern const char google_roots_pem[] asm("_binary_data_cert_roots_pem_start");
+
     struct Reading
     {
         QueueMessage message;
@@ -575,30 +577,10 @@ namespace
             return;
         }
 
-#if defined(ESP_ARDUINO_VERSION) && defined(ESP_ARDUINO_VERSION_VAL)
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 3, 12)
-
-        authSSL.useBuiltinCACertBundle();
-        liveSSL.useBuiltinCACertBundle();
-        historySSL.useBuiltinCACertBundle();
-        notificationSSL.useBuiltinCACertBundle();
-
-#else
-
-        authSSL.setInsecure();
-        liveSSL.setInsecure();
-        historySSL.setInsecure();
-        notificationSSL.setInsecure();
-
-#endif
-#else
-
-        authSSL.setInsecure();
-        liveSSL.setInsecure();
-        historySSL.setInsecure();
-        notificationSSL.setInsecure();
-
-#endif
+        authSSL.setCACert(google_roots_pem);
+        liveSSL.setCACert(google_roots_pem);
+        historySSL.setCACert(google_roots_pem);
+        notificationSSL.setCACert(google_roots_pem);
 
         firebaseApp.setTime(
             static_cast<uint32_t>(now));
