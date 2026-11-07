@@ -6,6 +6,7 @@
 #include <map>
 #include <vector>
 #include <esp_arduino_version.h>
+#include <esp_heap_caps.h>
 
 #define ENABLE_SERVICE_AUTH
 #define ENABLE_DATABASE
@@ -38,6 +39,8 @@ namespace
     constexpr uint32_t RETRY_DELAY_MS = 2000;
     constexpr uint32_t HISTORY_TIMEOUT_MS = 30000;
     constexpr uint32_t HISTORY_RECOVERY_LOG_MS = 10000;
+    constexpr uint32_t HEAP_LOG_INTERVAL_MS = 30000;
+    uint32_t lastHeapLog = 0;
 
     constexpr const char *DATABASE_URL =
         "https://loriota-8d71a-default-rtdb.europe-west1.firebasedatabase.app/";
@@ -56,12 +59,10 @@ namespace
     WiFiClientSecure authSSL;
     WiFiClientSecure liveSSL;
     WiFiClientSecure historySSL;
-    WiFiClientSecure notificationSSL;
 
     AsyncClientClass authClient(authSSL);
     AsyncClientClass liveClient(liveSSL);
     AsyncClientClass historyClient(historySSL);
-    AsyncClientClass notificationClient(notificationSSL);
 
     RealtimeDatabase database;
     Messaging messaging;
@@ -111,6 +112,44 @@ namespace
         }
 
         Serial.println(message);
+
+        if (serialMutex != nullptr)
+        {
+            xSemaphoreGive(serialMutex);
+        }
+    }
+
+    void logHeap(const char *source)
+    {
+        const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+
+        size_t freeMemory = heap_caps_get_free_size(caps);
+        size_t largestBlock = heap_caps_get_largest_free_block(caps);
+        size_t minimumFree = heap_caps_get_minimum_free_size(caps);
+
+        if (serialMutex != nullptr)
+        {
+            xSemaphoreTake(serialMutex, portMAX_DELAY);
+        }
+
+        Serial.printf(
+            "[HEAP] %s | Free: %u | Largest: %u | Minimum: %u\n",
+            source,
+            (unsigned)freeMemory,
+            (unsigned)largestBlock,
+            (unsigned)minimumFree);
+
+        Serial.printf(
+            "[HEAP] Tasks: Auth/FCM=%u Live=%u History=%u\n",
+            (unsigned)authClient.taskCount(),
+            (unsigned)liveClient.taskCount(),
+            (unsigned)historyClient.taskCount());
+
+        Serial.printf(
+            "[HEAP] Pending history: %u | Live in flight: %d | History in flight: %d\n",
+            (unsigned)pendingHistory.size(),
+            liveInFlight,
+            historyInFlight);
 
         if (serialMutex != nullptr)
         {
@@ -278,6 +317,11 @@ namespace
             return;
         }
 
+        if (!liveInFlight)
+        {
+            return;
+        }
+
         uint16_t nodeId = currentLive.message.data.node_id;
         uint32_t counter = currentLive.message.data.msg_counter;
 
@@ -325,6 +369,11 @@ namespace
         }
 
         if (!result.isError() && !result.available())
+        {
+            return;
+        }
+
+        if (!historyInFlight)
         {
             return;
         }
@@ -412,6 +461,11 @@ namespace
             return;
         }
 
+        if (!alarmActive || !notificationInFlight)
+        {
+            return;
+        }
+
         if (result.isError())
         {
             logMessage(
@@ -423,6 +477,7 @@ namespace
             ++activeSuccessCount;
         }
 
+        logHeap("After FCM");
         notificationInFlight = false;
         ++activeTokenIndex;
 
@@ -440,6 +495,11 @@ namespace
         }
 
         if (!result.isError() && !result.available())
+        {
+            return;
+        }
+
+        if (!tokenReadInFlight)
         {
             return;
         }
@@ -580,7 +640,6 @@ namespace
         authSSL.setCACert(google_roots_pem);
         liveSSL.setCACert(google_roots_pem);
         historySSL.setCACert(google_roots_pem);
-        notificationSSL.setCACert(google_roots_pem);
 
         firebaseApp.setTime(
             static_cast<uint32_t>(now));
@@ -600,6 +659,7 @@ namespace
         firebaseInitialized = true;
 
         logMessage("[Firebase] Initialized.");
+        logHeap("Firebase initialized");
     }
 
     void scheduleLive()
@@ -752,7 +812,7 @@ namespace
         tokenReadInFlight = true;
 
         database.get(
-            notificationClient,
+            authClient,
             "/config/device/tokens",
             onTokensResult,
             false,
@@ -806,8 +866,10 @@ namespace
 
         notificationInFlight = true;
 
+        logHeap("Before FCM");
+
         messaging.send(
-            notificationClient,
+            authClient,
             Messages::Parent(FIREBASE_PROJECT_ID),
             msg,
             onNotificationResult,
@@ -866,6 +928,12 @@ void firebaseTask(void *pvParameters)
         if (firebaseInitialized)
         {
             firebaseApp.loop();
+
+            if ((uint32_t)(millis() - lastHeapLog) >= HEAP_LOG_INTERVAL_MS)
+            {
+                lastHeapLog = millis();
+                logHeap("Periodic");
+            }
 
             checkHistoryWatchdog();
 

@@ -31,7 +31,7 @@ bool firebaseInitialized = false;
 SX1262 radio = new Module(
     LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
 
-volatile bool receivedFlag = false;
+TaskHandle_t loraTaskHandle = nullptr;
 
 WebServer configServer(80);
 Preferences wifiPreferences;
@@ -67,7 +67,21 @@ ICACHE_RAM_ATTR
 #endif
 void setFlag(void)
 {
-  receivedFlag = true;
+  if (loraTaskHandle == nullptr)
+  {
+    return;
+  }
+
+  BaseType_t higherPriorityTaskWoken = pdFALSE;
+
+  vTaskNotifyGiveFromISR(
+      loraTaskHandle,
+      &higherPriorityTaskWoken);
+
+  if (higherPriorityTaskWoken == pdTRUE)
+  {
+    portYIELD_FROM_ISR();
+  }
 }
 
 void blinkLed(int times)
@@ -83,13 +97,6 @@ void blinkLed(int times)
 
 void processLoRa()
 {
-  if (!receivedFlag)
-  {
-    return;
-  }
-
-  receivedFlag = false;
-
   uint8_t byteArr[sizeof(LoRaNodeData)];
 
   int state = radio.readData(
@@ -109,27 +116,27 @@ void processLoRa()
 
       msg.rssi = radio.getRSSI(false);
 
+      BaseType_t queueStatus = xQueueSend(loraQueue, &msg, 0);
+
       xSemaphoreTake(serialMutex, portMAX_DELAY);
 
-      Serial.println("\n[Radio Task] Correct frame captured");
-
-      Serial.printf(
-          "Node ID: %u, Counter: %u, State: %d\n",
-          msg.data.node_id,
-          msg.data.msg_counter,
-          msg.data.sensor_state);
-
-      xSemaphoreGive(serialMutex);
-
-      if (xQueueSend(loraQueue, &msg, 0) != pdPASS)
+      if (queueStatus == pdPASS)
       {
-        xSemaphoreTake(serialMutex, portMAX_DELAY);
+        Serial.println("\n[Radio Task] Correct frame captured");
 
+        Serial.printf(
+            "Node ID: %u, Counter: %u, State: %d\n",
+            msg.data.node_id,
+            msg.data.msg_counter,
+            msg.data.sensor_state);
+      }
+      else
+      {
         Serial.println(
             "[Radio Task] ERROR: Queue is full - dropping frame");
-
-        xSemaphoreGive(serialMutex);
       }
+
+      xSemaphoreGive(serialMutex);
     }
     else
     {
@@ -145,14 +152,15 @@ void processLoRa()
 
     xSemaphoreGive(serialMutex);
   }
+}
 
-  int receiveStatus = radio.startReceive();
-
-  if (receiveStatus != RADIOLIB_ERR_NONE)
+void loraTask(void *pvParameters)
+{
+  for (;;)
   {
-    Serial.printf(
-        "[LoRa] Receive restart failed: %d\n",
-        receiveStatus);
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    processLoRa();
   }
 }
 
@@ -258,6 +266,26 @@ void setup()
   else
   {
     radio.setDio2AsRfSwitch(true);
+
+    BaseType_t radioTaskCreated = xTaskCreatePinnedToCore(
+        loraTask,
+        "LoRaTask",
+        4096,
+        nullptr,
+        2,
+        &loraTaskHandle,
+        1);
+
+    if (radioTaskCreated != pdPASS)
+    {
+      Serial.println("[ERROR] Could not create LoRa task.");
+
+      while (true)
+      {
+        delay(1000);
+      }
+    }
+
     radio.setDio1Action(setFlag);
 
     state = radio.startReceive();
@@ -278,8 +306,6 @@ void setup()
 
 void loop()
 {
-  processLoRa();
-
   if (digitalRead(CONFIG_BUTTON_PIN) == LOW)
   {
     if (buttonPressedAt == 0)
@@ -304,14 +330,10 @@ void loop()
     buttonHandled = false;
   }
 
-  processLoRa();
-
   if (configPortalActive)
   {
     configServer.handleClient();
   }
-
-  processLoRa();
 
   if (WiFi.status() == WL_CONNECTED)
   {
@@ -409,8 +431,6 @@ void loop()
       }
     }
   }
-
-  processLoRa();
 
   delay(1);
 }
