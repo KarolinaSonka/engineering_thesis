@@ -69,7 +69,7 @@ const struct UTIL_LPM_Driver_s UTIL_PowerDriver =
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
-
+extern void SystemClock_Config(void);
 /* USER CODE END PFP */
 
 /* Exported functions --------------------------------------------------------*/

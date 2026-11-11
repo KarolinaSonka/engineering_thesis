@@ -46,9 +46,9 @@ extern "C" {
 #define USE_MODEM_LORA  1
 #define USE_MODEM_FSK   0
 
-#define RF_FREQUENCY    868000000U
+#define RF_FREQUENCY 868300000
 
-#define TX_OUTPUT_POWER 14
+#define TX_OUTPUT_POWER 2
 
 #define LORA_BANDWIDTH              0
 #define LORA_SPREADING_FACTOR       7

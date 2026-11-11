@@ -27,7 +27,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdbool.h>
 extern I2C_HandleTypeDef hi2c2;
+extern volatile bool wake_from_accel;
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,7 +50,9 @@ extern I2C_HandleTypeDef hi2c2;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+bool loriota_was_shutdown = false;
+bool loriota_rtc_preserved = false;
+bool loriota_woke_from_rtc = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,7 +90,20 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
+	hrtc.Instance = RTC;
+	__HAL_RCC_RTCAPB_CLK_ENABLE();
 
+	uint32_t shutdown_marker = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR16);
+
+	loriota_was_shutdown = (shutdown_marker == LORIOTA_SHUTDOWN_ARMED);
+
+	loriota_woke_from_rtc = loriota_was_shutdown
+			&& (__HAL_RTC_WAKEUPTIMER_GET_FLAG(
+					&hrtc, RTC_FLAG_WUTF) != RESET);
+
+	uint32_t rtc_magic = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR17);
+
+	loriota_rtc_preserved = (rtc_magic == LORIOTA_RTC_MAGIC);
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -96,6 +113,36 @@ int main(void)
   MX_I2C2_Init();
   MX_ADC_Init();
   /* USER CODE BEGIN 2 */
+	HAL_PWR_EnableBkUpAccess();
+
+	if (!loriota_rtc_preserved) {
+		HAL_RTCEx_BKUPWrite(&hrtc,
+		RTC_BKP_DR17,
+		LORIOTA_RTC_MAGIC);
+	}
+
+	HAL_RTCEx_BKUPWrite(&hrtc,
+	RTC_BKP_DR16, 0UL);
+
+	if (HAL_RTCEx_DeactivateWakeUpTimer(&hrtc) != HAL_OK) {
+		Error_Handler();
+	}
+
+	HAL_NVIC_ClearPendingIRQ(RTC_WKUP_IRQn);
+	HAL_NVIC_SetPriority(RTC_WKUP_IRQn, 1, 0);
+	HAL_NVIC_EnableIRQ(RTC_WKUP_IRQn);
+
+	if (loriota_was_shutdown && !loriota_woke_from_rtc) {
+		uint8_t int_source = 0;
+
+		if (HAL_I2C_Mem_Read(&hi2c2, 0xA6, 0x30,
+		I2C_MEMADD_SIZE_8BIT, &int_source, 1, 100) == HAL_OK) {
+			if (int_source & 0x10U) {
+				wake_from_accel = true;
+			}
+		}
+	}
+
 	uint8_t adxl_init_data = 0x08;
 	HAL_I2C_Mem_Write(&hi2c2, 0xA6, 0x2D, 1, &adxl_init_data, 1, 100);
 
@@ -133,7 +180,9 @@ int main(void)
 
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
 
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
+	if (!loriota_was_shutdown) {
+		HAL_Delay(15000);
+	}
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -143,10 +192,7 @@ int main(void)
     MX_SubGHz_Phy_Process();
 
     /* USER CODE BEGIN 3 */
-		HAL_PWR_EnterSLEEPMode(
-		        PWR_MAINREGULATOR_ON,
-		        PWR_SLEEPENTRY_WFI
-		    );
+
 	}
   /* USER CODE END 3 */
 }
@@ -171,14 +217,11 @@ void SystemClock_Config(void)
 
   /** Initializes the CPU, AHB and APB buses clocks
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_LSE
-                              |RCC_OSCILLATORTYPE_MSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSE|RCC_OSCILLATORTYPE_MSI;
   RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-  RCC_OscInitStruct.LSIDiv = RCC_LSI_DIV1;
-  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
   RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV1;

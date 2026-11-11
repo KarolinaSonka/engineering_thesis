@@ -1,21 +1,21 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    utilities_def.h
-  * @author  MCD Application Team
-  * @brief   Definitions for modules requiring utilities
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    utilities_def.h
+ * @author  MCD Application Team
+ * @brief   Definitions for modules requiring utilities
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
@@ -43,11 +43,11 @@ extern "C" {
 typedef enum
 {
   /* USER CODE BEGIN CFG_LPM_Id_t_0 */
-
+	CFG_LPM_RADIO_TX_Id,
   /* USER CODE END CFG_LPM_Id_t_0 */
   CFG_LPM_DUMMY_Id,
   /* USER CODE BEGIN CFG_LPM_Id_t */
-  CFG_LPM_APP_Id,
+	CFG_LPM_APP_Id,
   /* USER CODE END CFG_LPM_Id_t */
 } CFG_LPM_Id_t;
 
@@ -76,7 +76,7 @@ typedef enum
 {
   CFG_SEQ_Task_Default,
   /* USER CODE BEGIN CFG_SEQ_Task_Id_t */
-  CFG_SEQ_Task_TX,
+	CFG_SEQ_Task_TX,
   /* USER CODE END CFG_SEQ_Task_Id_t */
   CFG_SEQ_Task_NBR
 } CFG_SEQ_Task_Id_t;
