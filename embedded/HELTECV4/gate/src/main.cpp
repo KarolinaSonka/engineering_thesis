@@ -189,6 +189,9 @@ void setup()
   Serial.println();
   Serial.println("LORIOTA GATEWAY");
 
+  Serial.printf("LoRa frame size: %u bytes\n",
+              (unsigned int)sizeof(LoRaNodeData));
+
   WiFi.persistent(false);
 
   if (digitalRead(CONFIG_BUTTON_PIN) == LOW)
@@ -250,7 +253,7 @@ void setup()
 
   int state = radio.begin(
       868.3,
-      125.0,
+      500.0,
       7,
       5,
       RADIOLIB_SX126X_SYNC_WORD_PRIVATE,

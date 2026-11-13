@@ -444,15 +444,26 @@ static void TCRT5000_Off(void) {
 }
 
 static GPIO_PinState TCRT5000_Read(void) {
+	uint8_t low_count = 0;
+	uint8_t high_count = 0;
+
 	TCRT5000_On();
 
-	HAL_Delay(20);
+	for (uint8_t i = 0; i < 5; i++) {
+		if (HAL_GPIO_ReadPin(IR_GPIO_Port, IR_Pin) == GPIO_PIN_RESET) {
+			low_count++;
+		} else {
+			high_count++;
+		}
 
-	GPIO_PinState state = HAL_GPIO_ReadPin(IR_GPIO_Port, IR_Pin);
+		if (i < 4) {
+			HAL_Delay(5);
+		}
+	}
 
 	TCRT5000_Off();
 
-	return state;
+	return (low_count > high_count) ? GPIO_PIN_RESET : GPIO_PIN_SET;
 }
 
 void Master_Radio_Send(void) {
@@ -507,7 +518,8 @@ void Master_Radio_Send(void) {
 		vibration_active = false;
 	}
 
-	if (is_accel && is_door_closed && !ir_changed && !vibration_active) {
+	if (is_accel && !is_vib_end && is_door_closed && !ir_changed
+			&& !vibration_active) {
 		vibration_active = true;
 
 		flags |= DUTY_EVT_VIB;

@@ -50,7 +50,7 @@ extern "C" {
 
 #define TX_OUTPUT_POWER 2
 
-#define LORA_BANDWIDTH              0
+#define LORA_BANDWIDTH              2
 #define LORA_SPREADING_FACTOR       7
 #define LORA_CODINGRATE             1  /* [1: 4/5, 2: 4/6, 3: 4/7, 4: 4/8] */
 #define LORA_PREAMBLE_LENGTH        8

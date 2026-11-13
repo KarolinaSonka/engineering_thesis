@@ -24,12 +24,28 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onMessage(messaging, (payload) => {
-      new Notification(payload.notification.title, {
-        body: payload.notification.body,
-        icon: '/pwa-192x192.png'
-      });
+    const unsubscribe = onMessage(messaging, async (payload) => {
+      console.log('[FCM] Foreground message:', payload);
+
+      if (Notification.permission !== 'granted') {
+        return;
+      }
+
+      try {
+        const registration = await navigator.serviceWorker.ready;
+
+        await registration.showNotification(
+          payload.notification?.title || 'ALARM LORIOTA!',
+          {
+            body: payload.notification?.body || 'Wykryto zdarzenie alarmowe.',
+            icon: '/pwa-192x192.png'
+          }
+        );
+      } catch (error) {
+        console.error('[FCM] Notification display failed:', error);
+      }
     });
+
     return () => unsubscribe();
   }, []);
 

@@ -40,7 +40,6 @@ extern ADC_HandleTypeDef hadc;
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-//#define LORA_CODINGRATE                             1         /* [1: 4/5, 2: 4/6, 3: 4/7, 4: 4/8] */
 #define LORA_PREAMBLE_LENGTH                        8         /* Same for Tx and Rx */
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false

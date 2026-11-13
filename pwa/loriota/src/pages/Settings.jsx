@@ -24,7 +24,6 @@ import {
 
 import React, { useState, useEffect, useRef } from 'react';
 
-
 const Settings = () => {
   const [nodes, setNodes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,11 +35,6 @@ const Settings = () => {
   const [pushEnabled, setPushEnabled] = useState(false);
 
   const dirtyNodesRef = useRef(new Set());
-
-
-  // =====================================================
-  // CHECK FCM NOTIFICATION STATUS
-  // =====================================================
 
   useEffect(() => {
     let cancelled = false;
@@ -89,10 +83,6 @@ const Settings = () => {
     };
   }, []);
 
-
-  // =====================================================
-  // LOAD SENSORS FROM REALTIME DATABASE
-  // =====================================================
 
   useEffect(() => {
     const unsubscribe = onValue(
@@ -163,10 +153,6 @@ const Settings = () => {
   }, []);
 
 
-  // =====================================================
-  // HANDLE SENSOR SETTINGS INPUT
-  // =====================================================
-
   const handleInputChange = (node_id, field, value) => {
     dirtyNodesRef.current.add(node_id);
 
@@ -179,10 +165,6 @@ const Settings = () => {
     }));
   };
 
-
-  // =====================================================
-  // SAVE SENSOR SETTINGS TO RTDB
-  // =====================================================
 
   const handleSaveNode = async (node_id) => {
     setSavingId(node_id);
@@ -217,11 +199,6 @@ const Settings = () => {
       );
     }
   };
-
-
-  // =====================================================
-  // DELETE SENSOR FROM RTDB
-  // =====================================================
 
   const handleDeleteNode = async (node_id) => {
     const confirmed = window.confirm(
@@ -264,11 +241,6 @@ const Settings = () => {
       setDeletingId(null);
     }
   };
-
-
-  // =====================================================
-  // ENABLE / DISABLE FCM NOTIFICATIONS
-  // =====================================================
 
   const handlePushToggle = async () => {
     try {
@@ -364,11 +336,6 @@ const Settings = () => {
       );
     }
   };
-
-
-  // =====================================================
-  // GATEWAY WI-FI CONFIGURATION
-  // =====================================================
 
   const openGatewaySetup = () => {
     const confirmed = window.confirm(

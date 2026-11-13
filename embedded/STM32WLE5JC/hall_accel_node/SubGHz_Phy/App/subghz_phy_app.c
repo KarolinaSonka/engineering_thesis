@@ -461,7 +461,7 @@ static void HallSensor_On(void) {
 	HALL_POWER_GPIO_Port,
 	HALL_POWER_Pin, GPIO_PIN_SET);
 
-	HAL_Delay(20);
+	HAL_Delay(10);
 }
 
 static void HallSensor_Off(void) {
@@ -482,7 +482,8 @@ static GPIO_PinState HallSensor_ReadStable(void) {
 		else
 			high_count++;
 
-		HAL_Delay(5);
+		if (i < 4)
+			HAL_Delay(5);
 	}
 
 	HallSensor_Off();

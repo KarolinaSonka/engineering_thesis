@@ -105,7 +105,7 @@ const History = () => {
         }
 
         history_data.push({
-          id: doc_snap.id,
+          id: doc_snap.key,
           node_id: node_id,
           hour,
           day,
