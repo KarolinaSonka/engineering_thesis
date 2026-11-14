@@ -95,60 +95,109 @@ void blinkLed(int times)
   }
 }
 
+static uint32_t rxCorrect = 0;
+static uint32_t rxCrcErrors = 0;
+static uint32_t rxOtherErrors = 0;
+static uint32_t rxInvalidLength = 0;
+static uint32_t rxQueueDrops = 0;
+
 void processLoRa()
 {
-  uint8_t byteArr[sizeof(LoRaNodeData)];
+  uint8_t byteArr[sizeof(LoRaNodeData)] = {};
 
-  int state = radio.readData(
+  const size_t packetLength = radio.getPacketLength();
+
+  const int state = radio.readData(
       byteArr,
-      sizeof(LoRaNodeData));
+      sizeof(byteArr));
 
   if (state == RADIOLIB_ERR_NONE)
   {
-    if (radio.getPacketLength() == sizeof(LoRaNodeData))
+    if (packetLength == sizeof(LoRaNodeData))
     {
-      QueueMessage msg;
+      QueueMessage msg = {};
 
       memcpy(
           &msg.data,
           byteArr,
           sizeof(LoRaNodeData));
 
-      msg.rssi = radio.getRSSI(false);
+      msg.rssi = radio.getRSSI(true);
 
-      BaseType_t queueStatus = xQueueSend(loraQueue, &msg, 0);
+      const float snr = radio.getSNR();
 
-      xSemaphoreTake(serialMutex, portMAX_DELAY);
+      rxCorrect++;
 
-      if (queueStatus == pdPASS)
+      BaseType_t queueStatus =
+          xQueueSend(loraQueue, &msg, 0);
+
+      if (queueStatus != pdPASS)
       {
-        Serial.println("\n[Radio Task] Correct frame captured");
-
-        Serial.printf(
-            "Node ID: %u, Counter: %u, State: %d\n",
-            msg.data.node_id,
-            msg.data.msg_counter,
-            msg.data.sensor_state);
-      }
-      else
-      {
-        Serial.println(
-            "[Radio Task] ERROR: Queue is full - dropping frame");
+        rxQueueDrops++;
       }
 
-      xSemaphoreGive(serialMutex);
+      if (Serial &&
+          xSemaphoreTake(serialMutex, 0) == pdTRUE)
+      {
+        if (queueStatus == pdPASS)
+        {
+          Serial.printf(
+              "[LoRa] Node: %u | Counter: %u | "
+              "State: %d | RSSI: %.1f dBm | "
+              "SNR: %.1f dB\n",
+              msg.data.node_id,
+              msg.data.msg_counter,
+              msg.data.sensor_state,
+              (double)msg.rssi,
+              (double)snr);
+        }
+        else
+        {
+          Serial.println(
+              "[LoRa] Queue full - frame dropped.");
+        }
+
+        xSemaphoreGive(serialMutex);
+      }
     }
     else
     {
-      Serial.println("[LoRa] Invalid packet length.");
+      rxInvalidLength++;
     }
   }
   else
   {
-    xSemaphoreTake(serialMutex, portMAX_DELAY);
+    if (state == RADIOLIB_ERR_CRC_MISMATCH)
+    {
+      rxCrcErrors++;
+    }
+    else
+    {
+      rxOtherErrors++;
+    }
 
-    Serial.print("[LoRa] Packet read failed: ");
-    Serial.println(state);
+    if (Serial &&
+        xSemaphoreTake(serialMutex, 0) == pdTRUE)
+    {
+      Serial.printf(
+          "[LoRa] Packet read failed: %d\n",
+          state);
+
+      xSemaphoreGive(serialMutex);
+    }
+  }
+
+  if (Serial &&
+      xSemaphoreTake(serialMutex, 0) == pdTRUE)
+  {
+    Serial.printf(
+        "[RX STATS] Correct: %lu | CRC: %lu | "
+        "Other: %lu | Length: %lu | Drops: %lu\n",
+        (unsigned long)rxCorrect,
+        (unsigned long)rxCrcErrors,
+        (unsigned long)rxOtherErrors,
+        (unsigned long)rxInvalidLength,
+        (unsigned long)rxQueueDrops);
 
     xSemaphoreGive(serialMutex);
   }
@@ -175,6 +224,7 @@ void setup()
   pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
+  Serial.setTxTimeoutMs(5);
   delay(3000);
 
   serialMutex = xSemaphoreCreateMutex();
@@ -190,7 +240,7 @@ void setup()
   Serial.println("LORIOTA GATEWAY");
 
   Serial.printf("LoRa frame size: %u bytes\n",
-              (unsigned int)sizeof(LoRaNodeData));
+                (unsigned int)sizeof(LoRaNodeData));
 
   WiFi.persistent(false);
 

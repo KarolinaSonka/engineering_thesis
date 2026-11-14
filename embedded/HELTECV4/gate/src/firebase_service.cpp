@@ -6,7 +6,6 @@
 #include <map>
 #include <vector>
 #include <esp_arduino_version.h>
-#include <esp_heap_caps.h>
 
 #define ENABLE_SERVICE_AUTH
 #define ENABLE_DATABASE
@@ -39,8 +38,6 @@ namespace
     constexpr uint32_t RETRY_DELAY_MS = 2000;
     constexpr uint32_t HISTORY_TIMEOUT_MS = 30000;
     constexpr uint32_t HISTORY_RECOVERY_LOG_MS = 10000;
-    constexpr uint32_t HEAP_LOG_INTERVAL_MS = 30000;
-    uint32_t lastHeapLog = 0;
 
     constexpr const char *DATABASE_URL =
         "https://loriota-8d71a-default-rtdb.europe-west1.firebasedatabase.app/";
@@ -106,53 +103,14 @@ namespace
 
     void logMessage(const String &message)
     {
-        if (serialMutex != nullptr)
+        if (!Serial || serialMutex == nullptr)
         {
-            xSemaphoreTake(serialMutex, portMAX_DELAY);
+            return;
         }
 
-        Serial.println(message);
-
-        if (serialMutex != nullptr)
+        if (xSemaphoreTake(serialMutex, 0) == pdTRUE)
         {
-            xSemaphoreGive(serialMutex);
-        }
-    }
-
-    void logHeap(const char *source)
-    {
-        const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-
-        size_t freeMemory = heap_caps_get_free_size(caps);
-        size_t largestBlock = heap_caps_get_largest_free_block(caps);
-        size_t minimumFree = heap_caps_get_minimum_free_size(caps);
-
-        if (serialMutex != nullptr)
-        {
-            xSemaphoreTake(serialMutex, portMAX_DELAY);
-        }
-
-        Serial.printf(
-            "[HEAP] %s | Free: %u | Largest: %u | Minimum: %u\n",
-            source,
-            (unsigned)freeMemory,
-            (unsigned)largestBlock,
-            (unsigned)minimumFree);
-
-        Serial.printf(
-            "[HEAP] Tasks: Auth/FCM=%u Live=%u History=%u\n",
-            (unsigned)authClient.taskCount(),
-            (unsigned)liveClient.taskCount(),
-            (unsigned)historyClient.taskCount());
-
-        Serial.printf(
-            "[HEAP] Pending history: %u | Live in flight: %d | History in flight: %d\n",
-            (unsigned)pendingHistory.size(),
-            liveInFlight,
-            historyInFlight);
-
-        if (serialMutex != nullptr)
-        {
+            Serial.println(message);
             xSemaphoreGive(serialMutex);
         }
     }
@@ -477,7 +435,6 @@ namespace
             ++activeSuccessCount;
         }
 
-        logHeap("After FCM");
         notificationInFlight = false;
         ++activeTokenIndex;
 
@@ -659,7 +616,6 @@ namespace
         firebaseInitialized = true;
 
         logMessage("[Firebase] Initialized.");
-        logHeap("Firebase initialized");
     }
 
     void scheduleLive()
@@ -866,8 +822,6 @@ namespace
 
         notificationInFlight = true;
 
-        logHeap("Before FCM");
-
         messaging.send(
             authClient,
             Messages::Parent(FIREBASE_PROJECT_ID),
@@ -928,13 +882,6 @@ void firebaseTask(void *pvParameters)
         if (firebaseInitialized)
         {
             firebaseApp.loop();
-
-            if ((uint32_t)(millis() - lastHeapLog) >= HEAP_LOG_INTERVAL_MS)
-            {
-                lastHeapLog = millis();
-                logHeap("Periodic");
-            }
-
             checkHistoryWatchdog();
 
             firebaseReadyFlag = firebaseApp.ready();
