@@ -641,13 +641,6 @@ void Master_Radio_Send(void) {
 	radio_tx_busy = true;
 
 	Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
-
-	frame.msg_counter = global_msg_counter++;
-
-	tx_done_ok = false;
-	radio_tx_busy = true;
-
-	Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 }
 
 static void VibrationTimerCallback(void *context) {
