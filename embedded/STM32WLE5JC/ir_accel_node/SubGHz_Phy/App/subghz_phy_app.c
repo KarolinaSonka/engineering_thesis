@@ -77,6 +77,8 @@ extern bool loriota_has_saved_state;
 #define DUTY_EVT_VIB       (1UL << 1)
 #define DUTY_EVT_STATE     (1UL << 2)
 #define DUTY_EVT_REPORT    (1UL << 3)
+
+#define LORIOTA_MIN_TX_VDD_MV    2400UL
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -117,33 +119,33 @@ static uint32_t polls_until_report = REPORT_INTERVAL_POLLS;
 static void OnTxDone(void);
 
 /**
- * @brief Function to be executed on Radio Rx Done event
- * @param  payload ptr of buffer received
- * @param  size buffer size
- * @param  rssi
- * @param  LoraSnr_FskCfo
- */
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
-		int8_t LoraSnr_FskCfo);
+  * @brief Function to be executed on Radio Rx Done event
+  * @param  payload ptr of buffer received
+  * @param  size buffer size
+  * @param  rssi
+  * @param  LoraSnr_FskCfo
+  */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
 
 /**
- * @brief Function executed on Radio Tx Timeout event
- */
+  * @brief Function executed on Radio Tx Timeout event
+  */
 static void OnTxTimeout(void);
 
 /**
- * @brief Function executed on Radio Rx Timeout event
- */
+  * @brief Function executed on Radio Rx Timeout event
+  */
 static void OnRxTimeout(void);
 
 /**
- * @brief Function executed on Radio Rx Error event
- */
+  * @brief Function executed on Radio Rx Error event
+  */
 static void OnRxError(void);
 
 /* USER CODE BEGIN PFP */
 static void TxProcess(void);
 extern void Read_ADXL345(int16_t *x, int16_t *y, int16_t *z);
+extern bool Loriota_IsSupplyLow(void);
 static void DutyInit(void);
 static void DutyUpdate(void);
 static uint32_t DutyGetFlags(void);
@@ -155,21 +157,22 @@ static void DutyChargeTimeout(void);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
-void SubghzApp_Init(void) {
-	/* USER CODE BEGIN SubghzApp_Init_1 */
+void SubghzApp_Init(void)
+{
+  /* USER CODE BEGIN SubghzApp_Init_1 */
 
-	/* USER CODE END SubghzApp_Init_1 */
+  /* USER CODE END SubghzApp_Init_1 */
 
-	/* Radio initialization */
-	RadioEvents.TxDone = OnTxDone;
-	RadioEvents.RxDone = OnRxDone;
-	RadioEvents.TxTimeout = OnTxTimeout;
-	RadioEvents.RxTimeout = OnRxTimeout;
-	RadioEvents.RxError = OnRxError;
+  /* Radio initialization */
+  RadioEvents.TxDone = OnTxDone;
+  RadioEvents.RxDone = OnRxDone;
+  RadioEvents.TxTimeout = OnTxTimeout;
+  RadioEvents.RxTimeout = OnRxTimeout;
+  RadioEvents.RxError = OnRxError;
 
-	Radio.Init(&RadioEvents);
+  Radio.Init(&RadioEvents);
 
-	/* USER CODE BEGIN SubghzApp_Init_2 */
+  /* USER CODE BEGIN SubghzApp_Init_2 */
 
 	Radio.SetChannel(RF_FREQUENCY);
 	Radio.SetTxConfig(MODEM_LORA,
@@ -226,7 +229,7 @@ void SubghzApp_Init(void) {
 				polls_until_report--;
 			}
 
-			if (polls_until_report == 0U) {
+			if (polls_until_report == 0U || DutyGetFlags() != 0UL) {
 				wake_from_timer = true;
 			}
 
@@ -239,7 +242,7 @@ void SubghzApp_Init(void) {
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
 
 	Radio.Sleep();
-	/* USER CODE END SubghzApp_Init_2 */
+  /* USER CODE END SubghzApp_Init_2 */
 }
 
 /* USER CODE BEGIN EF */
@@ -247,8 +250,9 @@ void SubghzApp_Init(void) {
 /* USER CODE END EF */
 
 /* Private functions ---------------------------------------------------------*/
-static void OnTxDone(void) {
-	/* USER CODE BEGIN OnTxDone */
+static void OnTxDone(void)
+{
+  /* USER CODE BEGIN OnTxDone */
 	Radio.Sleep();
 
 	radio_tx_busy = false;
@@ -256,18 +260,19 @@ static void OnTxDone(void) {
 	tx_finished = true;
 
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	/* USER CODE END OnTxDone */
+  /* USER CODE END OnTxDone */
 }
 
-static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
-		int8_t LoraSnr_FskCfo) {
-	/* USER CODE BEGIN OnRxDone */
+static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo)
+{
+  /* USER CODE BEGIN OnRxDone */
 	Radio.Sleep();
-	/* USER CODE END OnRxDone */
+  /* USER CODE END OnRxDone */
 }
 
-static void OnTxTimeout(void) {
-	/* USER CODE BEGIN OnTxTimeout */
+static void OnTxTimeout(void)
+{
+  /* USER CODE BEGIN OnTxTimeout */
 	Radio.Sleep();
 
 	radio_tx_busy = false;
@@ -275,19 +280,21 @@ static void OnTxTimeout(void) {
 	tx_finished = true;
 
 	UTIL_SEQ_SetTask(TASK_TX, CFG_SEQ_Prio_0);
-	/* USER CODE END OnTxTimeout */
+  /* USER CODE END OnTxTimeout */
 }
 
-static void OnRxTimeout(void) {
-	/* USER CODE BEGIN OnRxTimeout */
+static void OnRxTimeout(void)
+{
+  /* USER CODE BEGIN OnRxTimeout */
 	Radio.Sleep();
-	/* USER CODE END OnRxTimeout */
+  /* USER CODE END OnRxTimeout */
 }
 
-static void OnRxError(void) {
-	/* USER CODE BEGIN OnRxError */
+static void OnRxError(void)
+{
+  /* USER CODE BEGIN OnRxError */
 	Radio.Sleep();
-	/* USER CODE END OnRxError */
+  /* USER CODE END OnRxError */
 }
 
 /* USER CODE BEGIN PrFD */
@@ -574,35 +581,54 @@ void Master_Radio_Send(void) {
 
 	frame.battery_lvl = 0;
 
+	uint32_t battery_mV = 0;
+	bool battery_adc_ok = false;
+
 	ADC_ChannelConfTypeDef sConfig = { 0 };
 
 	sConfig.Channel = ADC_CHANNEL_VREFINT;
 	sConfig.Rank = ADC_REGULAR_RANK_1;
 	sConfig.SamplingTime = ADC_SAMPLETIME_160CYCLES_5;
 
-	if (HAL_ADC_ConfigChannel(&hadc, &sConfig) == HAL_OK) {
-		HAL_Delay(1);
+	if (HAL_ADC_ConfigChannel(&hadc, &sConfig) == HAL_OK)
+	{
+	    HAL_Delay(1);
 
-		if (HAL_ADC_Start(&hadc) == HAL_OK) {
-			if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK) {
-				uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
+	    if (HAL_ADC_Start(&hadc) == HAL_OK)
+	    {
+	        if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK)
+	        {
+	            uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
 
-				uint32_t battery_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
-						ADC_RESOLUTION_12B);
+	            battery_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(
+	                raw_adc,
+	                ADC_RESOLUTION_12B
+	            );
 
-				int32_t bat_percent = ((int32_t) battery_mV - 2100) * 100 / 900;
+	            int32_t bat_percent =
+	                ((int32_t)battery_mV - 2100) * 100 / 900;
 
-				if (bat_percent > 100)
-					bat_percent = 100;
+	            if (bat_percent > 100)
+	                bat_percent = 100;
 
-				if (bat_percent < 0)
-					bat_percent = 0;
+	            if (bat_percent < 0)
+	                bat_percent = 0;
 
-				frame.battery_lvl = (uint8_t) bat_percent;
-			}
+	            frame.battery_lvl = (uint8_t)bat_percent;
 
-			HAL_ADC_Stop(&hadc);
-		}
+	            battery_adc_ok = true;
+	        }
+
+	        HAL_ADC_Stop(&hadc);
+	    }
+	}
+
+	if (!battery_adc_ok ||
+	    battery_mV < LORIOTA_MIN_TX_VDD_MV ||
+	    Loriota_IsSupplyLow())
+	{
+	    Radio.Sleep();
+	    return;
 	}
 
 	if (!DutyReserve(airtime)) {

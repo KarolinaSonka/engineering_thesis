@@ -38,6 +38,12 @@ namespace
     constexpr uint32_t RETRY_DELAY_MS = 2000;
     constexpr uint32_t HISTORY_TIMEOUT_MS = 30000;
     constexpr uint32_t HISTORY_RECOVERY_LOG_MS = 10000;
+    constexpr uint32_t LIVE_TIMEOUT_MS = 30000;
+    constexpr uint32_t LIVE_RECOVERY_LOG_MS = 10000;
+
+    uint32_t lastLiveRecoveryLog = 0;
+
+    bool liveRecovering = false;
 
     constexpr const char *DATABASE_URL =
         "https://loriota-8d71a-default-rtdb.europe-west1.firebasedatabase.app/";
@@ -621,6 +627,7 @@ namespace
     void scheduleLive()
     {
         if (liveInFlight ||
+            liveRecovering ||
             pendingLive.empty() ||
             !due(nextLiveRetry))
         {
@@ -750,6 +757,73 @@ namespace
         lastHistoryRecoveryLog = now;
 
         historyClient.stopAsync(true);
+    }
+
+    void checkLiveWatchdog()
+    {
+        uint32_t now = millis();
+
+        if (liveRecovering)
+        {
+            size_t tasks = liveClient.taskCount();
+
+            if (tasks == 0)
+            {
+                liveRecovering = false;
+                liveInFlight = false;
+                nextLiveRetry = now + RETRY_DELAY_MS;
+
+                logMessage(
+                    "[RTDB] Live client recovered. Retry scheduled.");
+
+                return;
+            }
+
+            if ((uint32_t)(now - lastLiveRecoveryLog) >=
+                LIVE_RECOVERY_LOG_MS)
+            {
+                lastLiveRecoveryLog = now;
+
+                logMessage(
+                    "[RTDB] Waiting for live client cleanup. Tasks: " +
+                    String(tasks));
+            }
+
+            return;
+        }
+
+        if (!liveInFlight)
+        {
+            return;
+        }
+
+        uint32_t elapsed = now - liveStarted;
+
+        if (elapsed < LIVE_TIMEOUT_MS)
+        {
+            return;
+        }
+
+        logMessage(
+            "[RTDB] Live watchdog timeout after " +
+            String(elapsed) + " ms");
+
+        logMessage(
+            "[RTDB] Live client tasks: " +
+            String(liveClient.taskCount()));
+
+        logMessage(
+            "[RTDB] Pending live records: " +
+            String(pendingLive.size()));
+
+        logMessage(
+            "[RTDB] Free heap: " +
+            String(ESP.getFreeHeap()) + " bytes");
+
+        liveRecovering = true;
+        lastLiveRecoveryLog = now;
+
+        liveClient.stopAsync(true);
     }
 
     void scheduleTokenRead()
@@ -882,6 +956,7 @@ void firebaseTask(void *pvParameters)
         if (firebaseInitialized)
         {
             firebaseApp.loop();
+            checkLiveWatchdog();
             checkHistoryWatchdog();
 
             firebaseReadyFlag = firebaseApp.ready();

@@ -81,6 +81,8 @@ extern bool loriota_rtc_preserved;
 #define DUTY_EVT_VIB      (1UL << 1)
 #define DUTY_EVT_STATE    (1UL << 2)
 #define DUTY_EVT_REPORT   (1UL << 3)
+
+#define LORIOTA_MIN_TX_VDD_MV    2400UL
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -168,6 +170,7 @@ static uint32_t DutyAirtimeMs(void);
 static uint32_t DutyWaitSeconds(uint32_t airtime_ms);
 static bool DutyReserve(uint32_t airtime_ms);
 static void DutyChargeTimeout(void);
+extern bool Loriota_IsSupplyLow(void);
 /* USER CODE END PFP */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -253,7 +256,7 @@ void SubghzApp_Init(void) {
 				polls_until_report--;
 			}
 
-			if (polls_until_report == 0U) {
+			if (polls_until_report == 0U || DutyGetFlags() != 0UL) {
 				wake_from_timer = true;
 			}
 
@@ -596,11 +599,14 @@ void Master_Radio_Send(void) {
 
 	frame.battery_lvl = 0;
 
+	uint32_t supply_mV = 0;
+	bool battery_adc_ok = false;
+
 	if (HAL_ADC_Start(&hadc) == HAL_OK) {
 		if (HAL_ADC_PollForConversion(&hadc, 100) == HAL_OK) {
 			uint32_t raw_adc = HAL_ADC_GetValue(&hadc);
 
-			uint32_t supply_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
+			supply_mV = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(raw_adc,
 					ADC_RESOLUTION_12B);
 
 			int32_t bat_percent = ((int32_t) supply_mV - 2200) * 100 / 800;
@@ -612,14 +618,29 @@ void Master_Radio_Send(void) {
 				bat_percent = 0;
 
 			frame.battery_lvl = (uint8_t) bat_percent;
+
+			battery_adc_ok = true;
 		}
 
 		HAL_ADC_Stop(&hadc);
 	}
 
+	if (!battery_adc_ok || supply_mV < LORIOTA_MIN_TX_VDD_MV
+			|| Loriota_IsSupplyLow()) {
+		Radio.Sleep();
+		return;
+	}
+
 	if (!DutyReserve(airtime)) {
 		return;
 	}
+
+	frame.msg_counter = global_msg_counter++;
+
+	tx_done_ok = false;
+	radio_tx_busy = true;
+
+	Radio.Send((uint8_t*) &frame, sizeof(LoRaNodeData));
 
 	frame.msg_counter = global_msg_counter++;
 

@@ -202,6 +202,20 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles PVD and PVM detector.
+  */
+void PVD_PVM_IRQHandler(void)
+{
+  /* USER CODE BEGIN PVD_PVM_IRQn 0 */
+
+  /* USER CODE END PVD_PVM_IRQn 0 */
+  HAL_PWREx_PVD_PVM_IRQHandler();
+  /* USER CODE BEGIN PVD_PVM_IRQn 1 */
+
+  /* USER CODE END PVD_PVM_IRQn 1 */
+}
+
+/**
   * @brief This function handles TIM17 Global Interrupt.
   */
 void TIM17_IRQHandler(void)

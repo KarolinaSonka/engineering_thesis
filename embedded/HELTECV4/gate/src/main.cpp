@@ -21,6 +21,9 @@
 #define LORA_SCK 9
 #define LORA_MISO 11
 #define LORA_MOSI 10
+#define LORA_FEM_POWER 7
+#define LORA_FEM_ENABLE 2
+#define LORA_FEM_MODE 5
 
 #define VEXT_PIN 36
 #define LED_PIN 35
@@ -213,6 +216,24 @@ void loraTask(void *pvParameters)
   }
 }
 
+void initializeLoRaFEM()
+{
+  pinMode(LORA_FEM_MODE, OUTPUT);
+  digitalWrite(LORA_FEM_MODE, HIGH);
+
+  pinMode(LORA_FEM_POWER, OUTPUT);
+  digitalWrite(LORA_FEM_POWER, HIGH);
+
+  delay(10);
+
+  pinMode(LORA_FEM_ENABLE, OUTPUT);
+  digitalWrite(LORA_FEM_ENABLE, HIGH);
+
+  delay(10);
+
+  Serial.println("[LoRa] KCT8103L FEM initialized in RX Bypass mode.");
+}
+
 void setup()
 {
   pinMode(VEXT_PIN, OUTPUT);
@@ -294,6 +315,8 @@ void setup()
     while (true)
       delay(1000);
   }
+
+  initializeLoRaFEM();
 
   SPI.begin(
       LORA_SCK,

@@ -53,6 +53,8 @@ LoriotaWakeReason_t loriota_wake_reason = LORIOTA_WAKE_BOOT;
 bool loriota_was_shutdown = false;
 
 static bool loriota_woke_from_rtc = false;
+
+static volatile bool loriota_pvd_low = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,7 +65,34 @@ extern void Loriota_EnterStandby(uint32_t seconds, uint32_t next_stage);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void Loriota_PVD_Init(void) {
+	PWR_PVDTypeDef sConfigPVD = { 0 };
 
+	sConfigPVD.PVDLevel = PWR_PVDLEVEL_2;
+
+	sConfigPVD.Mode = PWR_PVD_MODE_IT_FALLING;
+
+	if (HAL_PWR_ConfigPVD(&sConfigPVD) != HAL_OK) {
+		Error_Handler();
+	}
+
+	__HAL_PWR_PVD_EXTI_CLEAR_FLAG();
+
+	HAL_NVIC_SetPriority(PVD_PVM_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(PVD_PVM_IRQn);
+
+	HAL_PWR_EnablePVD();
+}
+
+void HAL_PWR_PVDCallback(void) {
+	if (__HAL_PWR_GET_FLAG(PWR_FLAG_PVDO) != RESET) {
+		loriota_pvd_low = true;
+	}
+}
+
+bool Loriota_IsSupplyLow(void) {
+	return loriota_pvd_low || (__HAL_PWR_GET_FLAG(PWR_FLAG_PVDO) != RESET);
+}
 /* USER CODE END 0 */
 
 /**
@@ -133,6 +162,7 @@ int main(void) {
 	MX_I2C2_Init();
 	MX_ADC_Init();
 	/* USER CODE BEGIN 2 */
+	Loriota_PVD_Init();
 	HAL_PWR_EnableBkUpAccess();
 
 	HAL_RTCEx_BKUPWrite(&hrtc,
