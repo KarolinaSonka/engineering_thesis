@@ -6,7 +6,7 @@ static volatile bool loriota_pvd_low = false;
 void PowerMonitor_Init(void) {
 	PWR_PVDTypeDef sConfigPVD = { 0 };
 
-	sConfigPVD.PVDLevel = PWR_PVDLEVEL_2; // 2,4 V treshold
+	sConfigPVD.PVDLevel = PWR_PVDLEVEL_2; // 2,4 V threshold
 	sConfigPVD.Mode = PWR_PVD_MODE_IT_FALLING;
 
 	if (HAL_PWR_ConfigPVD(&sConfigPVD) != HAL_OK) {

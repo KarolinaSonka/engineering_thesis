@@ -42,7 +42,7 @@ extern "C" {
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
 #define LORIOTA_SHUTDOWN_ARMED 0x53484457UL
-#define LORIOTA_RTC_MAGIC      0x48414C4CUL
+#define LORIOTA_RTC_STATE_SIGNATURE 0x48414C4CUL
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/
