@@ -332,8 +332,9 @@ const Settings = () => {
     const confirmed = window.confirm(
       'Aby skonfigurować Wi-Fi bramki Loriota:\n\n' +
       '1. Połącz telefon lub komputer z siecią Loriota-Setup.\n' +
-      '2. Jeśli urządzenie zgłasza brak Internetu, pozostań w tej sieci.\n' +
-      '3. Otwórz lokalny portal konfiguracji.\n\n' +
+      '2. Wpisz hasło: loriota_config.\n' +
+      '3. Jeśli urządzenie zgłasza brak Internetu, pozostań w tej sieci.\n' +
+      '4. Otwórz lokalny portal konfiguracji.\n\n' +
       'Czy otworzyć stronę konfiguracji?'
     );
 
@@ -399,6 +400,11 @@ const Settings = () => {
                 <p className="text-xs text-white/35 mt-2">
                   Sieć konfiguracyjna: Loriota-Setup
                 </p>
+
+                <p className="text-xs text-white/35 mt-1">
+                  Hasło: loriota_config
+                </p>
+
               </div>
             </div>
 
