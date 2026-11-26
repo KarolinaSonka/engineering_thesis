@@ -98,87 +98,17 @@ void blinkLed(int times)
   }
 }
 
-static uint32_t rxCorrect = 0;
-static uint32_t rxCrcErrors = 0;
-static uint32_t rxOtherErrors = 0;
-static uint32_t rxInvalidLength = 0;
-static uint32_t rxQueueDrops = 0;
-
 void processLoRa()
 {
   uint8_t byteArr[sizeof(LoRaNodeData)] = {};
 
   const size_t packetLength = radio.getPacketLength();
-
   const int state = radio.readData(
       byteArr,
       sizeof(byteArr));
 
-  if (state == RADIOLIB_ERR_NONE)
+  if (state != RADIOLIB_ERR_NONE)
   {
-    if (packetLength == sizeof(LoRaNodeData))
-    {
-      QueueMessage msg = {};
-
-      memcpy(
-          &msg.data,
-          byteArr,
-          sizeof(LoRaNodeData));
-
-      msg.rssi = radio.getRSSI(true);
-
-      const float snr = radio.getSNR();
-
-      rxCorrect++;
-
-      BaseType_t queueStatus =
-          xQueueSend(loraQueue, &msg, 0);
-
-      if (queueStatus != pdPASS)
-      {
-        rxQueueDrops++;
-      }
-
-      if (Serial &&
-          xSemaphoreTake(serialMutex, 0) == pdTRUE)
-      {
-        if (queueStatus == pdPASS)
-        {
-          Serial.printf(
-              "[LoRa] Node: %u | Counter: %u | "
-              "State: %d | RSSI: %.1f dBm | "
-              "SNR: %.1f dB\n",
-              msg.data.node_id,
-              msg.data.msg_counter,
-              msg.data.sensor_state,
-              (double)msg.rssi,
-              (double)snr);
-        }
-        else
-        {
-          Serial.println(
-              "[LoRa] Queue full - frame dropped.");
-        }
-
-        xSemaphoreGive(serialMutex);
-      }
-    }
-    else
-    {
-      rxInvalidLength++;
-    }
-  }
-  else
-  {
-    if (state == RADIOLIB_ERR_CRC_MISMATCH)
-    {
-      rxCrcErrors++;
-    }
-    else
-    {
-      rxOtherErrors++;
-    }
-
     if (Serial &&
         xSemaphoreTake(serialMutex, 0) == pdTRUE)
     {
@@ -188,19 +118,49 @@ void processLoRa()
 
       xSemaphoreGive(serialMutex);
     }
+
+    return;
   }
+
+  if (packetLength != sizeof(LoRaNodeData))
+  {
+    return;
+  }
+
+  QueueMessage msg = {};
+
+  memcpy(
+      &msg.data,
+      byteArr,
+      sizeof(LoRaNodeData));
+
+  msg.rssi = radio.getRSSI(true);
+
+  const float snr = radio.getSNR();
+
+  BaseType_t queueStatus =
+      xQueueSend(loraQueue, &msg, 0);
 
   if (Serial &&
       xSemaphoreTake(serialMutex, 0) == pdTRUE)
   {
-    Serial.printf(
-        "[RX STATS] Correct: %lu | CRC: %lu | "
-        "Other: %lu | Length: %lu | Drops: %lu\n",
-        (unsigned long)rxCorrect,
-        (unsigned long)rxCrcErrors,
-        (unsigned long)rxOtherErrors,
-        (unsigned long)rxInvalidLength,
-        (unsigned long)rxQueueDrops);
+    if (queueStatus == pdPASS)
+    {
+      Serial.printf(
+          "[LoRa] Node: %u | Counter: %u | "
+          "State: %d | RSSI: %.1f dBm | "
+          "SNR: %.1f dB\n",
+          msg.data.node_id,
+          msg.data.msg_counter,
+          msg.data.sensor_state,
+          (double)msg.rssi,
+          (double)snr);
+    }
+    else
+    {
+      Serial.println(
+          "[LoRa] Queue full - frame dropped.");
+    }
 
     xSemaphoreGive(serialMutex);
   }
@@ -234,16 +194,8 @@ void initializeLoRaFEM()
   Serial.println("[LoRa] KCT8103L FEM initialized in RX Bypass mode.");
 }
 
-void setup()
+static void initializeSerial()
 {
-  pinMode(VEXT_PIN, OUTPUT);
-  digitalWrite(VEXT_PIN, LOW);
-
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-
-  pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
-
   Serial.begin(115200);
   Serial.setTxTimeoutMs(5);
   delay(3000);
@@ -259,10 +211,12 @@ void setup()
 
   Serial.println();
   Serial.println("LORIOTA GATEWAY");
-
   Serial.printf("LoRa frame size: %u bytes\n",
                 (unsigned int)sizeof(LoRaNodeData));
+}
 
+static void initializeWiFi()
+{
   WiFi.persistent(false);
 
   if (digitalRead(CONFIG_BUTTON_PIN) == LOW)
@@ -290,7 +244,10 @@ void setup()
   {
     Serial.println("[Firebase] Initialization deferred until Wi-Fi connects.");
   }
+}
 
+static void initializeFirebaseTask()
+{
   loraQueue = xQueueCreate(10, sizeof(QueueMessage));
 
   if (loraQueue == nullptr)
@@ -315,7 +272,10 @@ void setup()
     while (true)
       delay(1000);
   }
+}
 
+static void initializeLoRa()
+{
   initializeLoRaFEM();
 
   SPI.begin(
@@ -376,11 +336,27 @@ void setup()
       Serial.println(state);
     }
   }
+}
+
+void setup()
+{
+  pinMode(VEXT_PIN, OUTPUT);
+  digitalWrite(VEXT_PIN, LOW);
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
+
+  initializeSerial();
+  initializeWiFi();
+  initializeFirebaseTask();
+  initializeLoRa();
 
   blinkLed(3);
 }
 
-void loop()
+static void handleConfigurationButton()
 {
   if (digitalRead(CONFIG_BUTTON_PIN) == LOW)
   {
@@ -405,108 +381,128 @@ void loop()
     buttonPressedAt = 0;
     buttonHandled = false;
   }
+}
+
+static void handleConnectedWiFi()
+{
+  if (!wifiConnected)
+  {
+    wifiConnected = true;
+    wifiReconnectInProgress = false;
+    wifiReconnectStarted = 0;
+    wifiConnectionFailed = false;
+    wifiConnectedAt = millis();
+
+    Serial.println("[WiFi] Connected successfully.");
+    Serial.print("[WiFi] Local IP: ");
+    Serial.println(WiFi.localIP());
+
+    configTime(
+        0,
+        0,
+        "pool.ntp.org",
+        "time.nist.gov");
+
+    initializeFirebase();
+  }
+
+  if (configPortalActive &&
+      closePortalAfterConnection &&
+      millis() - wifiConnectedAt >= PORTAL_CLOSE_DELAY)
+  {
+    Serial.println(
+        "[WiFi] Closing configuration portal.");
+
+    configServer.stop();
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+
+    configPortalActive = false;
+    closePortalAfterConnection = false;
+    wifiConnectStarted = 0;
+  }
+}
+
+static void handleDisconnectedWiFi()
+{
+  if (wifiConnected)
+  {
+    wifiConnected = false;
+    wifiReconnectInProgress = false;
+    wifiReconnectStarted = 0;
+    lastWifiRetry = millis();
+
+    Serial.println("[WiFi] Connection lost.");
+  }
+
+  if (configPortalActive &&
+      wifiConnectStarted != 0 &&
+      millis() - wifiConnectStarted >= WIFI_CONNECT_TIMEOUT)
+  {
+    wifiConnectionFailed = true;
+    wifiConnectStarted = 0;
+
+    Serial.println("[WiFi] Connection timed out.");
+    Serial.println(
+        "[WiFi] Check the password and 2.4 GHz network.");
+
+    WiFi.disconnect(false, false);
+    WiFi.mode(WIFI_AP_STA);
+  }
+
+  if (!configPortalActive &&
+      wifiReconnectInProgress &&
+      millis() - wifiReconnectStarted >= WIFI_CONNECT_TIMEOUT)
+  {
+    WiFi.disconnect(false, false);
+
+    wifiReconnectInProgress = false;
+    wifiReconnectStarted = 0;
+    lastWifiRetry = millis();
+
+    Serial.println(
+        "[WiFi] Reconnection attempt timed out.");
+  }
+
+  if (!configPortalActive &&
+      !wifiReconnectInProgress &&
+      millis() - lastWifiRetry >= 10000)
+  {
+    lastWifiRetry = millis();
+
+    Serial.println(
+        "[WiFi] Trying to reconnect to a saved network.");
+
+    if (reconnectToSavedWiFi())
+    {
+      wifiReconnectInProgress = true;
+      wifiReconnectStarted = millis();
+    }
+  }
+}
+
+static void updateWiFiConnection()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    handleConnectedWiFi();
+  }
+  else
+  {
+    handleDisconnectedWiFi();
+  }
+}
+
+void loop()
+{
+  handleConfigurationButton();
 
   if (configPortalActive)
   {
     configServer.handleClient();
   }
 
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    if (!wifiConnected)
-    {
-      wifiConnected = true;
-      wifiReconnectInProgress = false;
-      wifiReconnectStarted = 0;
-      wifiConnectionFailed = false;
-      wifiConnectedAt = millis();
-
-      Serial.println("[WiFi] Connected successfully.");
-      Serial.print("[WiFi] Local IP: ");
-      Serial.println(WiFi.localIP());
-
-      configTime(
-          0,
-          0,
-          "pool.ntp.org",
-          "time.nist.gov");
-
-      initializeFirebase();
-    }
-
-    if (configPortalActive &&
-        closePortalAfterConnection &&
-        millis() - wifiConnectedAt >= PORTAL_CLOSE_DELAY)
-    {
-      Serial.println(
-          "[WiFi] Closing configuration portal.");
-
-      configServer.stop();
-      WiFi.softAPdisconnect(true);
-      WiFi.mode(WIFI_STA);
-
-      configPortalActive = false;
-      closePortalAfterConnection = false;
-      wifiConnectStarted = 0;
-    }
-  }
-  else
-  {
-    if (wifiConnected)
-    {
-      wifiConnected = false;
-      wifiReconnectInProgress = false;
-      wifiReconnectStarted = 0;
-      lastWifiRetry = millis();
-
-      Serial.println("[WiFi] Connection lost.");
-    }
-
-    if (configPortalActive &&
-        wifiConnectStarted != 0 &&
-        millis() - wifiConnectStarted >= WIFI_CONNECT_TIMEOUT)
-    {
-      wifiConnectionFailed = true;
-      wifiConnectStarted = 0;
-
-      Serial.println("[WiFi] Connection timed out.");
-      Serial.println(
-          "[WiFi] Check the password and 2.4 GHz network.");
-
-      WiFi.disconnect(false, false);
-      WiFi.mode(WIFI_AP_STA);
-    }
-
-    if (!configPortalActive &&
-        wifiReconnectInProgress &&
-        millis() - wifiReconnectStarted >= WIFI_CONNECT_TIMEOUT)
-    {
-      WiFi.disconnect(false, false);
-
-      wifiReconnectInProgress = false;
-      wifiReconnectStarted = 0;
-      lastWifiRetry = millis();
-
-      Serial.println(
-          "[WiFi] Reconnection attempt timed out.");
-    }
-
-    if (!configPortalActive &&
-        !wifiReconnectInProgress &&
-        millis() - lastWifiRetry >= 10000)
-    {
-      lastWifiRetry = millis();
-
-      Serial.println(
-          "[WiFi] Trying to reconnect to a saved network.");
-
-      if (reconnectToSavedWiFi())
-      {
-        wifiReconnectInProgress = true;
-        wifiReconnectStarted = millis();
-      }
-    }
-  }
+  updateWiFiConnection();
 
   delay(1);
 }
