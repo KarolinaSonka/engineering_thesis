@@ -1,21 +1,21 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.h
-  * @brief          : Header for main.c file.
-  *                   This file contains the common defines of the application.
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.h
+ * @brief          : Header for main.c file.
+ *                   This file contains the common defines of the application.
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
@@ -36,14 +36,13 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-typedef enum
-{
-    LORIOTA_WAKE_BOOT = 0,
-    LORIOTA_WAKE_PERIODIC,
-    LORIOTA_WAKE_ACCEL,
-    LORIOTA_WAKE_REED,
-    LORIOTA_WAKE_COOLDOWN_END,
-    LORIOTA_WAKE_UNEXPECTED
+typedef enum {
+	LORIOTA_WAKE_BOOT = 0,
+	LORIOTA_WAKE_PERIODIC,
+	LORIOTA_WAKE_ACCEL,
+	LORIOTA_WAKE_REED,
+	LORIOTA_WAKE_COOLDOWN_END,
+	LORIOTA_WAKE_UNEXPECTED
 } LoriotaWakeReason_t;
 /* USER CODE END ET */
 
@@ -52,7 +51,7 @@ typedef enum
 extern LoriotaWakeReason_t loriota_wake_reason;
 extern bool loriota_rtc_preserved;
 
-#define LORIOTA_BKP_MAGIC_VALUE  0x5348444EUL  // SHDN
+#define LORIOTA_BACKUP_STATE_SIGNATURE  0x5348444EUL  // SHDN
 #define LORIOTA_STAGE_PERIODIC   1UL
 #define LORIOTA_STAGE_COOLDOWN   2UL
 #define LORIOTA_SHUTDOWN_ARMED 0x53484457UL
