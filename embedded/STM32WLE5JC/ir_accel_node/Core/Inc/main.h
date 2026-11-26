@@ -45,15 +45,14 @@ extern bool loriota_has_saved_state;
 extern bool loriota_rtc_preserved;
 extern bool loriota_woke_from_rtc;
 
-#define LORIOTA_RTC_MAGIC 0x52544349UL
-#define LORIOTA_IR_MAGIC  0x49525333UL
-
-#define LORIOTA_BKP_APP_MAGIC  RTC_BKP_DR13
-#define LORIOTA_BKP_VIBRATION  RTC_BKP_DR14
-#define LORIOTA_BKP_COUNTER    RTC_BKP_DR15
-#define LORIOTA_BKP_RTC_MAGIC  RTC_BKP_DR17
-#define LORIOTA_BKP_POLLS      RTC_BKP_DR18
-#define LORIOTA_BKP_IR_STATE   RTC_BKP_DR19
+#define LORIOTA_RTC_STATE_SIGNATURE 	   0x52544349UL
+#define LORIOTA_IR_STATE_SIGNATURE  	   0x49525333UL
+#define LORIOTA_BKP_APP_SIGNATURE_REGISTER RTC_BKP_DR13
+#define LORIOTA_BKP_VIBRATION  			   RTC_BKP_DR14
+#define LORIOTA_BKP_COUNTER    			   RTC_BKP_DR15
+#define LORIOTA_BKP_RTC_SIGNATURE_REGISTER RTC_BKP_DR17
+#define LORIOTA_BKP_POLLS      			   RTC_BKP_DR18
+#define LORIOTA_BKP_IR_STATE   			   RTC_BKP_DR19
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/

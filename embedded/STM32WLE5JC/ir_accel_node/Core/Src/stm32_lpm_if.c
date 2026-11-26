@@ -19,6 +19,8 @@
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
+#include "adc.h"
+#include "i2c.h"
 #include "platform.h"
 #include "stm32_lpm.h"
 #include "stm32_lpm_if.h"
