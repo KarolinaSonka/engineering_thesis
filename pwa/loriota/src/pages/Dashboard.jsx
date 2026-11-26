@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { rtdb, auth } from '../firebaseConfig';
 import { ref, onValue } from 'firebase/database';
 import { signOut } from 'firebase/auth';
@@ -122,11 +122,6 @@ const Dashboard = () => {
 
         setNodes(updatedNodes);
 
-        console.log(
-          "[RTDB] Dashboard updated:",
-          Object.keys(updatedNodes).length,
-          "sensors"
-        );
       },
 
       (error) => {
@@ -276,32 +271,28 @@ const Dashboard = () => {
 
               const is_offline = node.raw_date ? (time - node.raw_date) > (16 * 60 * 1000) : true;
 
-              const is_closed = node.state === 0;
               const is_open = node.state === 1;
               const is_vibrating = node.state === 2;
 
               if (node.type === 0) {
-                const has_vibration = node.state === 2;
-                const has_new_letter = false;
-
                 return (
                   <div key={node.id} className={`relative overflow-hidden rounded-[32px] p-[1px] transition-all duration-500 w-full animate-in fade-in zoom-in-95 
-                  ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : has_vibration ? 'bg-gradient-to-r from-amber-400/60 to-[#d9652b]/60 scale-[1.02] shadow-[0_0_30px_rgba(245,158,11,0.2)]' : has_new_letter ? 'bg-gradient-to-r from-[#4dc4c9]/50 to-blue-500/50' : 'bg-white/5'}`}>
-                    <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${has_vibration && !is_offline ? 'bg-[#1c160e]/80' : 'bg-[#151210]/60'}`}>
-                      {has_vibration && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-amber-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
+                  ${is_offline ? 'bg-red-500/20 grayscale opacity-80' : is_vibrating ? 'bg-gradient-to-r from-amber-400/60 to-[#d9652b]/60 scale-[1.02] shadow-[0_0_30px_rgba(245,158,11,0.2)]' : 'bg-white/5'}`}>
+                    <div className={`relative z-10 rounded-[31px] p-6 h-full backdrop-blur-2xl flex flex-col justify-between min-h-[160px] ${is_vibrating && !is_offline ? 'bg-[#1c160e]/80' : 'bg-[#151210]/60'}`}>
+                      {is_vibrating && !is_offline && <div className="absolute right-0 top-0 w-40 h-40 bg-amber-500/20 rounded-full blur-3xl translate-x-1/4 -translate-y-1/4 pointer-events-none"></div>}
 
                       <div className="flex justify-between items-center mb-6 relative z-10">
                         <div className="flex items-center space-x-4 min-w-0">
                           <div className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center border relative shadow-inner transition-colors duration-300 
-                          ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : has_vibration ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : has_new_letter ? 'bg-[#4dc4c9]/20 border-[#4dc4c9]/30 text-[#4dc4c9]' : 'bg-black/30 border-white/5 text-white/40'}`}>
-                            <Mailbox size={24} className={has_vibration && !is_offline ? 'animate-bounce' : ''} />
+                          ${is_offline ? 'bg-black/50 border-red-500/30 text-white/20' : is_vibrating ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : 'bg-black/30 border-white/5 text-white/40'}`}>
+                            <Mailbox size={24} className={is_vibrating && !is_offline ? 'animate-bounce' : ''} />
                           </div>
                           <div className="min-w-0">
                             <h3 className={`text-lg font-light truncate ${is_offline ? 'text-white/50 line-through' : 'text-white'}`}>{node.name}</h3>
                             <div className="flex flex-col space-y-1 mt-1">
                               {is_offline ? (
                                 <span className="text-sm font-medium text-red-400 flex items-center gap-1.5 whitespace-nowrap"><WifiOff size={14} /> Offline (Brak zasięgu)</span>
-                              ) : has_vibration ? (
+                              ) : is_vibrating ? (
                                 <span className="text-sm font-medium text-amber-400 flex items-center gap-1.5 whitespace-nowrap"><Activity size={14} /> Wykryto wstrząsy!</span>
                               ) : (
                                 <span className="text-sm font-light text-white/50 flex items-center gap-1.5 whitespace-nowrap"><CheckCircle2 size={14} className="text-[#4dc4c9]" /> Spoczynek</span>

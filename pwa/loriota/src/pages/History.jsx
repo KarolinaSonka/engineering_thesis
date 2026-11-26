@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ref,
   query,
@@ -8,7 +8,7 @@ import {
 } from 'firebase/database';
 
 import { rtdb } from '../firebaseConfig';
-import { Clock, Activity, AlertTriangle, Lock, Unlock, Zap, CheckCircle2 } from 'lucide-react';
+import { Clock, Activity, Lock, Unlock, Zap, CheckCircle2 } from 'lucide-react';
 
 const History = () => {
   const [logs, setLogs] = useState([]);

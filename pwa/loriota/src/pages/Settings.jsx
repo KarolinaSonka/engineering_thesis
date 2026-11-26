@@ -22,7 +22,9 @@ import {
   Wifi
 } from 'lucide-react';
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+
+const FCM_VAPID_KEY = 'BDg2d1Lb39u3e0SGQEC7DgJ-C_eeTjQ7ctKDITA956y-FzO2nk9vcpP1RmONa6B_GHEabvfPKHWOjh7PWZJIa2w';
 
 const Settings = () => {
   const [nodes, setNodes] = useState([]);
@@ -47,7 +49,7 @@ const Settings = () => {
 
       try {
         const token = await getToken(messaging, {
-          vapidKey: 'BDg2d1Lb39u3e0SGQEC7DgJ-C_eeTjQ7ctKDITA956y-FzO2nk9vcpP1RmONa6B_GHEabvfPKHWOjh7PWZJIa2w'
+          vapidKey: FCM_VAPID_KEY
         });
 
         const snapshot = await get(
@@ -221,11 +223,6 @@ const Settings = () => {
 
       dirtyNodesRef.current.delete(node_id);
 
-      console.log(
-        "[RTDB] Deleted node:",
-        node_id
-      );
-
     } catch (error) {
       console.error(
         "[RTDB] Failed to delete node:",
@@ -244,8 +241,6 @@ const Settings = () => {
 
   const handlePushToggle = async () => {
     try {
-      console.log("[FCM] Toggle clicked");
-
       const isCurrentlyEnabled =
         Notification.permission === 'granted' &&
         pushEnabled;
@@ -264,7 +259,7 @@ const Settings = () => {
       }
 
       const currentToken = await getToken(messaging, {
-        vapidKey: 'BDg2d1Lb39u3e0SGQEC7DgJ-C_eeTjQ7ctKDITA956y-FzO2nk9vcpP1RmONa6B_GHEabvfPKHWOjh7PWZJIa2w'
+        vapidKey: FCM_VAPID_KEY
       });
 
       if (!currentToken) {
@@ -307,10 +302,6 @@ const Settings = () => {
           "RTDB transaction was not committed."
         );
       }
-
-      console.log(
-        "[FCM] Notification token updated in Realtime Database."
-      );
 
       setPushEnabled(!isCurrentlyEnabled);
 
