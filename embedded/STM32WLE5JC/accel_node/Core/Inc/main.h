@@ -51,7 +51,7 @@ typedef enum
 extern LoriotaWakeReason_t loriota_wake_reason;
 extern bool loriota_was_shutdown;
 
-#define LORIOTA_BKP_MAGIC_VALUE  0x4C4F5249UL
+#define LORIOTA_BACKUP_STATE_SIGNATURE  0x4C4F5249UL
 #define LORIOTA_STAGE_PERIODIC   1UL
 #define LORIOTA_STAGE_COOLDOWN   2UL
 #define LORIOTA_SHUTDOWN_ARMED 0x5348444EUL
