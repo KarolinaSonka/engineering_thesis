@@ -581,14 +581,6 @@ namespace
         }
 
         previousSensorStates[nodeId] = state;
-
-        logMessage(
-            "[PERF] Processing node " +
-            String(nodeId) +
-            ", counter " +
-            String(message.data.msg_counter) +
-            ", queued frames: " +
-            String(uxQueueMessagesWaiting(loraQueue)));
     }
 
     void beginFirebase()
